@@ -208,8 +208,12 @@ def cmd_pick(args) -> int:
     res = _api(port, "pick", {"pdf": book["id"], "sections": args.section or [], "pages": pages, "first": args.first,
                               "last": args.last, "numbers": numbers, "name": args.name or "", "dry": args.dry}, timeout=900)
     n, free = res["count"], res.get("free", 0)
-    cost = "문서에 든 내용을 그대로 꺼내므로 옮겨 적는 비용이 없습니다" if n and free == n else \
-        f"옮겨 적는 비용 약 {(n - free) * 0.0004:.3f}달러" + (f", {free}문제는 문서에서 그대로 꺼냅니다" if free else "")
+    from . import reader
+    if n and free == n:
+        cost = "문서에 든 내용을 그대로 꺼내므로 옮겨 적는 비용이 없습니다"
+    else:                                    # 달러 값은 엔진이 모델을 직접 부를 때만 뜻이 있다
+        cost = (f"옮겨 적는 비용 약 {(n - free) * 0.0004:.3f}달러" if reader.available(ws) else "옮겨 적기는 가벼운 서브에이전트가 맡습니다") \
+            + (f", {free}문제는 문서에서 그대로 꺼냅니다" if free else "")
     print(f"{book['name']}에서 문제 {n}개를 모았습니다(한글 문서로 {-(-n // 4)}쪽쯤, {cost}).")
     for line in res["spans"]:
         print("  " + line)
