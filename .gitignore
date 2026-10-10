@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+hwpick_data/
+runs/
+.cache/
+# 교재와 만든 문서는 저장소에 올리지 않는다
+*.pdf
+*.hwp
+sample/
+validation/

@@ -1,0 +1,27 @@
+[project]
+name = "hwpick"
+version = "0.1.0"
+description = "스캔 수학 교재 PDF에서 고른 문제만 OCR해 한글 양식에 넣는 에이전트 스킬 엔진"
+requires-python = ">=3.10"
+# 판 번호를 못 박아 둔다: 글자 인식 꾸러미(rapidocr)는 안쪽 구조를 직접 쓰는데 3.10에서 그 구조가 바뀌어 동작하지 않았다.
+# 아래는 실제로 돌려 확인한 조합이다. 올릴 때는 새 조합으로 끝까지 돌려 본 뒤에 바꾼다
+dependencies = [
+    "pymupdf==1.28.2",
+    "numpy==2.5.3",
+    "opencv-python-headless==5.0.0.93",
+    "pillow==12.3.0",
+    "rapidocr==3.9.2",
+    # DirectML판: GPU가 있으면 쓰고 없으면 CPU로 돈다(일반 onnxruntime과 함께 설치하면 충돌한다)
+    "onnxruntime-directml==1.24.4; sys_platform == 'win32'",
+    "onnxruntime>=1.18; sys_platform != 'win32'",
+    "lxml==6.1.3",
+    # 한글 프로그램을 움직이는 부분(윈도우 전용). 수식 변환기 latex-to-hwpeqn은 vendor/의 wheel을 setup.bat이 설치한다
+    "pywin32==312; sys_platform == 'win32'",
+    "psutil==7.2.2; sys_platform == 'win32'",
+]
+
+[tool.setuptools.packages.find]
+include = ["hwpick*"]
+
+[tool.setuptools.package-data]
+hwpick = ["web/*", "assets/*"]

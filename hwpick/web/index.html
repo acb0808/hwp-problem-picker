@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HWPick 문제 고르기</title>
+<style>
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --line: #e2e5ea; --text: #1d2330; --muted: #6b7385;
+  --accent: #3b5bdb; --accent-soft: rgba(59, 91, 219, .14); --pick: #0ca678; --pick-soft: rgba(12, 166, 120, .2);
+  --warn: #e8590c; --stem: #f08c00; --shadow: 0 1px 3px rgba(20, 30, 60, .12);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #15181e; --panel: #1e222b; --line: #2f3542; --text: #e7eaf0; --muted: #98a1b3;
+    --accent: #7c96ff; --accent-soft: rgba(124, 150, 255, .2); --pick: #38d9a9; --pick-soft: rgba(56, 217, 169, .25);
+    --shadow: 0 1px 3px rgba(0, 0, 0, .5); }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 14px/1.45 "Pretendard", "Malgun Gothic", system-ui, sans-serif;
+  display: grid; grid-template-columns: 250px minmax(0, 1fr) 330px; grid-template-rows: 100%; }
+button, input, select { font: inherit; color: inherit; }
+button { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 6px 11px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.on { background: var(--accent-soft); border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+input[type=text], input[type=number], select { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 6px 8px; min-width: 0; }
+aside { background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+#left { border-right: 1px solid var(--line); }
+#right { border-left: 1px solid var(--line); }
+.head { padding: 14px 14px 8px; font-weight: 700; font-size: 15px; display: flex; align-items: center; justify-content: space-between; }
+.sub { color: var(--muted); font-size: 12px; font-weight: 400; }
+.scroll { overflow-y: auto; flex: 1; min-height: 0; padding: 0 8px 8px; }
+.pdf { padding: 8px 10px; border-radius: 8px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+.pdf:hover { background: var(--bg); }
+.pdf.cur { background: var(--accent-soft); font-weight: 600; }
+.pdf .n { word-break: break-all; }
+.pdf .p { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.foot { border-top: 1px solid var(--line); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.row { display: flex; gap: 6px; align-items: center; }
+.row > input[type=text] { flex: 1; }
+main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+#bar { display: flex; align-items: center; gap: 8px; padding: 9px 14px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+#bar .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 80px; }
+#pageno { width: 64px; text-align: center; }
+#view { flex: 1; overflow: auto; padding: 18px; min-height: 0; position: relative; }
+#pages { --pw: 900px; user-select: none; }
+.pg { position: relative; width: var(--pw); margin: 0 auto 16px; background: #fff; box-shadow: var(--shadow); overflow: hidden; }
+.pg img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; -webkit-user-drag: none; }
+.pg .pgno { position: absolute; right: 8px; top: 6px; z-index: 3; background: rgba(29, 35, 48, .62); color: #fff; font-size: 12px;
+  padding: 1px 8px; border-radius: 10px; pointer-events: none; }
+.pg .wait { position: absolute; left: 50%; top: 40%; transform: translateX(-50%); color: #98a1b3; font-size: 14px; pointer-events: none; }
+.pg .chip { position: absolute; left: 8px; top: 6px; z-index: 3; background: rgba(59, 91, 219, .9); color: #fff; font-size: 12px;
+  padding: 2px 10px; border-radius: 10px; }
+.pg .chip.err { background: rgba(232, 89, 12, .92); cursor: pointer; }
+.box { position: absolute; z-index: 2; border: 2px solid var(--accent); border-radius: 4px; cursor: pointer; background: transparent; transition: background .1s; }
+.box:hover { background: var(--accent-soft); }
+.box.sel { border-color: var(--pick); background: var(--pick-soft); }
+.box .tag { position: absolute; left: -2px; top: -2px; background: var(--pick); color: #fff; font-weight: 700; font-size: 13px;
+  min-width: 24px; height: 24px; line-height: 24px; text-align: center; border-radius: 4px 0 6px 0; display: none; padding: 0 5px; }
+.box.sel .tag { display: block; }
+.box.manual { border-style: dashed; }
+.stem { position: absolute; z-index: 1; border: 2px dashed var(--stem); border-radius: 4px; pointer-events: none; opacity: 0; }
+.stem.show { opacity: 1; background: rgba(240, 140, 0, .1); }
+.draw { position: absolute; z-index: 4; border: 2px dashed var(--warn); background: rgba(232, 89, 12, .12); pointer-events: none; }
+#pages.drawing .pg { cursor: crosshair; }
+#pages.drawing .box { pointer-events: none; }
+#msg { text-align: center; color: var(--muted); padding: 70px 20px; }
+#msg b { color: var(--text); font-size: 16px; display: block; margin-bottom: 8px; }
+.prog { width: 260px; height: 8px; background: var(--line); border-radius: 4px; margin: 16px auto 0; overflow: hidden; }
+.prog i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+.item { display: grid; grid-template-columns: 26px 1fr 24px; gap: 8px; align-items: start; padding: 8px 6px; border-radius: 8px; border: 1px solid transparent; }
+.item:hover { border-color: var(--line); }
+.item.drag { opacity: .4; }
+.item.over { border-color: var(--accent); }
+.item .no { background: var(--pick); color: #fff; font-weight: 700; border-radius: 6px; text-align: center; height: 24px; line-height: 24px; cursor: grab; }
+.item .src { font-size: 12px; color: var(--muted); margin-bottom: 4px; cursor: pointer; }
+.item .src:hover { color: var(--accent); }
+/* 글로 미리 옮겨 둔 상태: 초록(옮겨 둠), 노랑(옮기는 중), 빨강(못 옮김) */
+.item .rd { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 6px; vertical-align: 1px; }
+.item .rd.ok { background: #2ecc71; }
+.item .rd.working { background: #f1c40f; animation: rdpulse 1s ease-in-out infinite; }
+.item .rd.error { background: #e74c3c; }
+@keyframes rdpulse { 50% { opacity: .25; } }
+.item img { max-width: 100%; max-height: 150px; border: 1px solid var(--line); border-radius: 4px; background: #fff; display: block; }
+.item .x { border: none; background: none; color: var(--muted); padding: 0; font-size: 16px; }
+.item .x:hover { color: var(--warn); }
+.empty { color: var(--muted); padding: 30px 14px; text-align: center; }
+#toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: #1d2330; color: #fff; padding: 9px 16px;
+  border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 80vw; }
+#toast.show { opacity: .95; }
+code { background: var(--bg); padding: 1px 6px; border-radius: 5px; font-family: Consolas, monospace; }
+</style>
+</head>
+<body>
+<aside id="left">
+  <div class="head">교재 <span class="sub" id="pdfcount"></span></div>
+  <div class="scroll" id="pdfs"></div>
+  <div class="foot">
+    <div class="sub">다른 폴더의 PDF·한글 문서도 보려면 폴더 경로를 넣으세요.</div>
+    <div class="row"><input type="text" id="folder" placeholder="예: D:\교재"><button id="addfolder">추가</button></div>
+  </div>
+</aside>
+
+<main>
+  <div id="bar">
+    <span class="title" id="title">왼쪽에서 교재를 고르세요</span>
+    <button id="prev" title="이전 쪽 (←)">▲</button>
+    <input type="number" id="pageno" min="1" value="1">
+    <span class="sub" id="pagetotal"></span>
+    <button id="next" title="다음 쪽 (→)">▼</button>
+    <button id="zoomout" title="작게">−</button>
+    <button id="zoomin" title="크게">＋</button>
+    <button id="drawbtn" title="박스가 없거나 틀린 문제를 직접 드래그해서 담습니다">직접 그리기</button>
+  </div>
+  <div id="view">
+    <div id="msg"><b>문제를 클릭해서 담으세요</b>왼쪽에서 교재를 고르고, 박스가 쳐진 문제를 누르면 오른쪽 목록에 담깁니다.<br>다 고른 뒤 <code>에이전트에 전달</code>을 눌러 복사한 문구를 채팅에 붙여 넣으면 됩니다.</div>
+    <div id="pages" style="display:none"></div>
+  </div>
+</main>
+
+<aside id="right">
+  <div class="head">담은 문제 <span class="sub" id="count">0개</span></div>
+  <div class="foot" style="border-top:none; border-bottom:1px solid var(--line)">
+    <div class="row"><select id="tasksel" style="flex:1"></select><button id="newtask" title="새 목록을 시작합니다">새 목록</button></div>
+    <div class="row"><input type="text" id="taskname" placeholder="목록 이름 (예: 3월 2주 데일리)"></div>
+    <div class="row"><button class="primary" id="copytask" style="flex:1">에이전트에 전달 (복사)</button><button id="copyids" title="문항 ID만 복사">ID만</button></div>
+  </div>
+  <div class="scroll" id="items" style="padding-top:8px"></div>
+</aside>
+<div id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const api = async (path, opt = {}) => {
+  const r = await fetch('/api/' + path, opt.body ? { ...opt, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(opt.body) } : opt);
+  const j = await r.json();
+  if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { status: r.status });
+  return j;
+};
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+// S.seq는 교재를 바꿀 때마다 올라간다. 늦게 도착한 이전 교재의 응답은 이 값으로 걸러 버린다.
+const S = { pdfs: [], pdf: null, info: null, page: 1, task: null, zoom: +(localStorage.zoom || 1), drawing: false, seq: 0 };
+const P = new Map();      // 쪽 번호 -> 화면의 쪽 상태
+const BOX = new Map();    // '교재:쪽' -> 받아 둔 박스
+const Q = [];             // 박스를 받아 올 쪽 번호(뒤가 최신)
+const view = $('view');
+let io = null, tops = [], active = 0;
+
+function toast(text) {
+  const t = $('toast'); t.textContent = text; t.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200);
+}
+function showMsg(html) { $('pages').style.display = 'none'; $('msg').style.display = ''; $('msg').innerHTML = html; }
+
+// ---------- 교재 목록
+async function loadLibrary() {
+  const lib = await api('library');
+  S.pdfs = lib.pdfs;
+  $('pdfcount').textContent = lib.pdfs.length + '권';
+  $('pdfs').innerHTML = lib.pdfs.length ? '' : '<div class="empty">PDF나 한글 문서가 없습니다.<br>아래에 폴더를 추가하세요.</div>';
+  for (const p of lib.pdfs) {
+    const d = document.createElement('div');
+    d.className = 'pdf' + (S.pdf && S.pdf.id === p.id ? ' cur' : '');
+    d.innerHTML = '<span class="n"></span><span class="p"></span>';
+    d.firstChild.textContent = p.name; d.lastChild.textContent = p.pages ? p.pages + '쪽' : '한글';
+    d.onclick = () => openPdf(p.id);
+    $('pdfs').appendChild(d);
+  }
+}
+$('addfolder').onclick = async () => {
+  try { await api('library', { method: 'POST', body: { path: $('folder').value } }); $('folder').value = ''; await loadLibrary(); toast('폴더를 추가했습니다'); }
+  catch (e) { toast(e.message); }
+};
+
+async function openPdf(id, page) {
+  const pdf = S.pdfs.find(p => p.id === id);
+  if (!pdf) return;
+  if (S.pdf && S.pdf.id === id && S.info) { if (page) goTo(page); return; }
+  const seq = ++S.seq;
+  closePages();
+  S.pdf = pdf; S.info = null;
+  localStorage.lastPdf = id;
+  S.page = page || +(localStorage['page_' + id] || 1);
+  $('title').textContent = pdf.name;
+  $('pagetotal').textContent = pdf.pages ? '/ ' + pdf.pages : '';
+  $('pageno').max = pdf.pages || 1; $('pageno').value = S.page;
+  [...$('pdfs').children].forEach((d, i) => d.classList.toggle('cur', S.pdfs[i] && S.pdfs[i].id === id));
+  showMsg('<b>교재를 여는 중입니다</b>');
+  for (;;) {
+    let st;
+    try { st = await api(`pdf/${id}/status`); }
+    catch (e) {
+      if (seq !== S.seq) return;
+      showMsg('<b>잠시 연결이 끊겼습니다</b>다시 시도하는 중입니다.');
+      await sleep(1500);
+      if (seq !== S.seq) return;
+      continue;
+    }
+    if (seq !== S.seq) return;
+    if (st.state === 'ready') break;
+    if (st.state === 'error') { showMsg('<b>교재를 여는 데 실패했습니다</b>'); $('msg').append(st.error); return; }
+    if (st.state === 'opening') {
+      showMsg('<b>한글 문서를 여는 중입니다</b>한글 프로그램으로 한 번 바꿔 둡니다(보통 30초쯤, 쪽이 많은 문서는 몇 분). 다음부터는 바로 열립니다.<br>이 문서가 한글에서 열려 있으면 먼저 닫아 주세요.');
+      await sleep(1000);
+      if (seq !== S.seq) return;
+      continue;
+    }
+    const pct = st.total ? Math.round(100 * st.done / st.total) : 0;
+    showMsg(`<b>이 교재를 처음 여는 중입니다</b>문제 번호가 어떻게 생겼는지 익히고 있어요 (${st.done}/${st.total || '?'}쪽).<br>한 번만 하면 다음부터는 바로 열립니다. 기다리는 동안 다른 교재를 봐도 됩니다.<div class="prog"><i style="width:${pct}%"></i></div>`);
+    await sleep(700);
+    if (seq !== S.seq) return;
+  }
+  let info;
+  try { info = await api(`pdf/${id}/info`); }
+  catch (e) { if (seq === S.seq) showMsg('<b>교재를 여는 데 실패했습니다</b>'); return; }
+  if (seq !== S.seq) return;
+  S.info = info;
+  pdf.pages = info.pages;            // 한글 문서는 열고 나서야 쪽 수를 안다
+  const row = $('pdfs').children[S.pdfs.indexOf(pdf)];
+  if (row) row.lastChild.textContent = info.pages + '쪽';
+  $('pagetotal').textContent = '/ ' + info.pages; $('pageno').max = info.pages;
+  buildPages();
+  goTo(S.page);
+}
+
+// ---------- 쪽 보기(이어서 스크롤). 화면 근처의 쪽만 그림과 박스를 불러오고, 멀어지면 내려놓는다.
+function closePages() {
+  if (io) io.disconnect();
+  P.forEach(p => p.ctl && p.ctl.abort());
+  P.clear(); Q.length = 0; tops = [];
+  $('pages').innerHTML = '';
+}
+function buildPages() {
+  const frag = document.createDocumentFragment();
+  S.info.sizes.forEach(([w, h], i) => {
+    const el = document.createElement('div');
+    el.className = 'pg'; el.dataset.n = i + 1; el.style.aspectRatio = `${w} / ${h}`;
+    el.innerHTML = `<span class="pgno">${i + 1}쪽</span><span class="wait">불러오는 중…</span>`;
+    frag.appendChild(el);
+    P.set(i + 1, { n: i + 1, el, w, h, on: false, img: null, imgReady: false, boxes: null, err: '', tries: 0, busy: false, ctl: null });
+  });
+  $('pages').appendChild(frag);
+  $('msg').style.display = 'none'; $('pages').style.display = '';
+  applyZoom();
+  io = new IntersectionObserver(es => es.forEach(e => {
+    const p = P.get(+e.target.dataset.n);
+    if (p) e.isIntersecting ? enter(p) : leave(p);
+  }), { root: view, rootMargin: '100% 0px' });
+  P.forEach(p => io.observe(p.el));
+}
+function enter(p) {
+  if (p.on) return;
+  p.on = true; p.tries = 0; p.err = '';
+  const img = new Image();
+  img.decoding = 'async'; img.draggable = false;
+  // 내려받기가 끝난 것(load)과 화면에 그릴 준비가 된 것(decode)은 다르다. 준비된 뒤에 박스를 그린다.
+  const ready = () => { if (p.img === img) { p.imgReady = true; p.el.querySelector('.wait').style.display = 'none'; paint(p); } };
+  // 창이 가려져 있으면 decode가 늦게 끝날 수 있으므로 1.5초 넘게는 기다리지 않는다.
+  img.onload = () => { Promise.race([img.decode ? img.decode().catch(() => {}) : null, sleep(1500)]).then(ready); };
+  img.onerror = () => { if (p.img === img) p.el.querySelector('.wait').textContent = '그림을 불러오지 못했습니다'; };
+  img.src = `/api/pdf/${S.pdf.id}/image/${p.n}`;
+  p.img = img; p.el.prepend(img);
+  p.boxes = BOX.get(S.pdf.id + ':' + p.n) || null;
+  if (!p.boxes) { Q.push(p.n); pump(); }
+}
+function leave(p) {
+  if (!p.on) return;
+  p.on = false; p.imgReady = false;
+  if (p.ctl) p.ctl.abort();
+  if (p.img) { p.img.onload = p.img.onerror = null; p.img.remove(); p.img = null; }
+  p.el.querySelectorAll('.box,.stem,.chip').forEach(e => e.remove());
+  const w = p.el.querySelector('.wait'); w.style.display = ''; w.textContent = '불러오는 중…';
+}
+
+// 박스 요청은 한 번에 둘까지만 보내고, 나중에 화면에 들어온 쪽을 먼저 처리한다.
+function pump() {
+  while (active < 2 && Q.length) {
+    const p = P.get(Q.pop());
+    if (!p || !p.on || p.boxes || p.busy) continue;
+    active++;
+    fetchBoxes(p).finally(() => { active--; pump(); });
+  }
+}
+async function fetchBoxes(p) {
+  const id = S.pdf.id, seq = S.seq;
+  p.ctl = new AbortController(); p.busy = true;
+  try {
+    const info = await api(`pdf/${id}/boxes/${p.n}`, { signal: p.ctl.signal });
+    p.busy = false;
+    if (seq !== S.seq) return;
+    if (info.error) p.err = '이 쪽은 문제를 찾지 못했습니다 (눌러서 다시 시도)';
+    else BOX.set(id + ':' + p.n, info.boxes);
+    p.boxes = info.boxes;
+    paint(p);
+  } catch (e) {
+    p.busy = false;
+    if (seq !== S.seq || !p.on || p.boxes) return;
+    if (++p.tries <= 6) setTimeout(() => { if (seq === S.seq && p.on && !p.boxes) { Q.push(p.n); pump(); } }, 500 * p.tries);
+    else { p.err = '문제를 찾지 못했습니다 (눌러서 다시 시도)'; paint(p); }
+  }
+}
+function place(el, r, p) {
+  el.style.left = 100 * r[0] / p.w + '%'; el.style.top = 100 * r[1] / p.h + '%';
+  el.style.width = 100 * (r[2] - r[0]) / p.w + '%'; el.style.height = 100 * (r[3] - r[1]) / p.h + '%';
+}
+// 그림이 뜬 뒤에만 박스를 그린다(박스가 먼저 뜨면 엉뚱한 쪽 위에 보인다).
+function paint(p) {
+  p.el.querySelectorAll('.box,.stem,.chip').forEach(e => e.remove());
+  if (!p.on || !p.imgReady) return;
+  if (!p.boxes || p.err) {
+    const c = document.createElement('span');
+    c.className = 'chip' + (p.err ? ' err' : ''); c.textContent = p.err || '문제 찾는 중…';
+    if (p.err) c.onclick = () => { p.err = ''; p.tries = 0; p.boxes = null; paint(p); Q.push(p.n); pump(); };
+    p.el.appendChild(c);
+  }
+  const items = S.task ? S.task.items : [];
+  const manual = items.filter(it => it.manual && it.pdf_id === S.pdf.id && it.page === p.n);
+  for (const b of [...(p.boxes || []), ...manual.map(it => ({ id: it.pid, label: it.label, bbox: it.bbox, stem: null, manual: true }))]) {
+    const el = document.createElement('div');
+    const at = items.findIndex(it => it.pid === b.id);
+    el.className = 'box' + (at >= 0 ? ' sel' : '') + (b.manual ? ' manual' : '');
+    el.title = b.manual ? '직접 그린 영역' : '문제 ' + b.label;
+    el.innerHTML = '<span class="tag"></span>'; el.firstChild.textContent = at >= 0 ? at + 1 : '';
+    place(el, b.bbox, p);
+    let stem = null;
+    if (b.stem) { stem = document.createElement('div'); stem.className = 'stem' + (at >= 0 ? ' show' : ''); place(stem, b.stem, p); p.el.appendChild(stem); }
+    el.onmouseenter = () => stem && stem.classList.add('show');
+    el.onmouseleave = () => stem && at < 0 && stem.classList.remove('show');
+    el.onclick = () => toggle(b, p.n);
+    p.el.appendChild(el);
+  }
+}
+function drawBoxes() { P.forEach(p => p.on && paint(p)); }
+
+// 보고 있는 위치는 (쪽, 그 쪽 안에서의 비율)로 기억한다. 확대하거나 창 크기가 바뀌어도 같은 자리를 다시 보여 준다.
+function measure() { tops = [...P.values()].map(p => p.el.offsetTop); }
+function applyZoom() {
+  if (!S.info) return;
+  const fit = view.clientWidth - 40;
+  if (fit <= 0) return;
+  $('pages').style.setProperty('--pw', Math.round(Math.min(fit, 980) * S.zoom) + 'px');
+  measure();
+  const cur = P.get(S.page);
+  if (cur) { view.scrollTop = cur.el.offsetTop + (S.frac || 0) * cur.el.offsetHeight; S.jump = view.scrollTop; }
+}
+function setCurrent(n) {
+  S.page = n; localStorage['page_' + S.pdf.id] = n;
+  if (document.activeElement !== $('pageno')) $('pageno').value = n;
+}
+function goTo(n) {
+  if (!S.info) return;
+  n = Math.max(1, Math.min(S.info.pages, n | 0));
+  const el = P.get(n).el;
+  S.frac = -8 / Math.max(1, el.offsetHeight);
+  view.scrollTop = el.offsetTop - 8; S.jump = view.scrollTop;
+  setCurrent(n);
+}
+let ticking = false;
+view.onscroll = () => {
+  if (ticking || !S.info) return;
+  ticking = true;
+  requestAnimationFrame(() => {
+    ticking = false;
+    if (!tops.length) return;
+    const jumped = S.jump != null && Math.abs(view.scrollTop - S.jump) < 2;
+    S.jump = null;
+    if (jumped) return;                                 // 코드가 방금 옮긴 자리면 위치 기억을 바꾸지 않는다
+    const y = view.scrollTop + view.clientHeight * 0.3;
+    let lo = 0, hi = tops.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (tops[mid] <= y) lo = mid; else hi = mid - 1; }
+    const el = P.get(lo + 1).el;
+    S.frac = (view.scrollTop - el.offsetTop) / Math.max(1, el.offsetHeight);
+    if (lo + 1 !== S.page) setCurrent(lo + 1);
+  });
+};
+$('prev').onclick = () => goTo(S.page - 1);
+$('next').onclick = () => goTo(S.page + 1);
+$('pageno').onchange = () => { $('pageno').blur(); goTo(+$('pageno').value); };
+$('zoomin').onclick = () => { S.zoom = Math.min(2.5, S.zoom * 1.15); localStorage.zoom = S.zoom; applyZoom(); };
+$('zoomout').onclick = () => { S.zoom = Math.max(.4, S.zoom / 1.15); localStorage.zoom = S.zoom; applyZoom(); };
+new ResizeObserver(applyZoom).observe(view);
+document.onkeydown = e => {
+  if (/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  if (e.key === 'ArrowLeft') goTo(S.page - 1);
+  if (e.key === 'ArrowRight') goTo(S.page + 1);
+  if (e.key === 'Escape' && S.drawing) $('drawbtn').click();
+};
+
+// ---------- 직접 그리기
+$('drawbtn').onclick = () => { S.drawing = !S.drawing; $('drawbtn').classList.toggle('on', S.drawing); $('pages').classList.toggle('drawing', S.drawing);
+  if (S.drawing) toast('문제 영역을 드래그하세요 (끝내려면 Esc)'); };
+let drag = null;
+const rel = (e, el) => { const r = el.getBoundingClientRect(); return [Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (e.clientY - r.top) / r.height))]; };
+$('pages').onpointerdown = e => {
+  const el = S.drawing && e.target.closest('.pg');
+  if (!el) return;
+  const d = document.createElement('div'); d.className = 'draw'; d.style.display = 'none'; el.appendChild(d);
+  drag = { p: P.get(+el.dataset.n), start: rel(e, el), d };
+  try { $('pages').setPointerCapture(e.pointerId); } catch {}
+  e.preventDefault();
+};
+$('pages').onpointermove = e => {
+  if (!drag) return;
+  const [x, y] = rel(e, drag.p.el), s = drag.start, d = drag.d;
+  d.style.display = 'block'; d.style.left = 100 * Math.min(x, s[0]) + '%'; d.style.top = 100 * Math.min(y, s[1]) + '%';
+  d.style.width = 100 * Math.abs(x - s[0]) + '%'; d.style.height = 100 * Math.abs(y - s[1]) + '%';
+};
+$('pages').onpointerup = $('pages').onpointercancel = async e => {
+  if (!drag) return;
+  const { p, start: s, d } = drag; drag = null; d.remove();
+  const [x, y] = rel(e, p.el);
+  const bbox = [Math.min(x, s[0]) * p.w, Math.min(y, s[1]) * p.h, Math.max(x, s[0]) * p.w, Math.max(y, s[1]) * p.h].map(v => Math.round(v * 10) / 10);
+  if (e.type === 'pointercancel' || bbox[2] - bbox[0] < 15 || bbox[3] - bbox[1] < 10) return;
+  await ensureTask();
+  const pid = `${S.pdf.id.slice(0, 6)}-${p.n}-m${Date.now() % 100000}`;
+  S.task.items.push({ pid, pdf_id: S.pdf.id, pdf_name: S.pdf.name, pdf_path: S.pdf.path, page: p.n, label: '직접', bbox, stem: null, manual: true });
+  await saveTask(); drawBoxes(); renderItems();
+};
+
+// ---------- 담은 문제(태스크)
+// 첫 문제를 빠르게 연달아 눌러도 목록은 하나만 만든다.
+let making = null;
+async function ensureTask() {
+  if (S.task) return;
+  making ||= api('tasks', { method: 'POST', body: { name: '' } }).finally(() => { making = null; });
+  const made = await making;
+  if (S.task) return;
+  S.task = made; localStorage.lastTask = made.id; await loadTasks();
+}
+// 저장은 누른 순서대로 하나씩 보낸다. 응답으로 화면의 목록을 덮어쓰지 않는다(그 사이에 누른 것이 사라진다).
+let saving = Promise.resolve();
+function saveTask() {
+  const task = S.task;
+  saving = saving.catch(() => {}).then(() => api('tasks/' + task.id, { method: 'PUT', body: task }))
+    .then(saved => { task.updated = saved.updated; watchReady(); });
+  return saving;
+}
+// 담은 문제는 서버가 뒤에서 미리 글로 옮겨 둔다(한글 파일을 만들 때 기다리지 않게). 그 상태를 문제마다 점으로 보여 준다.
+let readyTimer = null;
+async function watchReady() {
+  clearTimeout(readyTimer);
+  if (!S.task || !S.task.items.length) return;
+  const id = S.task.id;
+  let res;
+  try { res = await api('tasks/' + id + '/ready'); } catch { return; }
+  if (!S.task || S.task.id !== id) return;
+  S.ready = res.available ? res.states : {};
+  paintReady();
+  if (Object.values(S.ready).includes('working')) readyTimer = setTimeout(watchReady, 1500);
+}
+function paintReady() {
+  const words = { ok: '글로 옮겨 두었습니다', working: '글로 옮기는 중입니다', error: '글로 옮기지 못했습니다(문제 그림이 그대로 들어갑니다)' };
+  document.querySelectorAll('#items .rd').forEach(dot => {
+    const st = (S.ready || {})[dot.dataset.pid] || '';
+    dot.className = 'rd ' + st; dot.title = words[st] || '';
+  });
+}
+// 에이전트가 명령으로 목록을 고쳤을 수 있다(직접 잡은 영역 넣기, 빼기). 화면으로 돌아오면 서버의 목록을 다시 읽는다.
+// 저장 시각은 초 단위라 같은 초에 고친 것을 놓칠 수 있어, 담긴 문제들도 견준다
+async function refreshTask() {
+  if (!S.task || document.hidden) return;
+  const id = S.task.id;
+  await saving.catch(() => {});
+  let now;
+  try { now = await api('tasks/' + id); } catch { return; }
+  if (!S.task || S.task.id !== id) return;
+  const ids = t => t.items.map(it => it.pid).join(' ');
+  if (now.updated === S.task.updated && ids(now) === ids(S.task)) return;
+  S.task = now; renderItems(); drawBoxes(); watchReady();
+}
+window.addEventListener('focus', refreshTask);
+document.addEventListener('visibilitychange', refreshTask);
+async function toggle(b, page) {
+  await ensureTask();
+  const at = S.task.items.findIndex(it => it.pid === b.id);
+  if (at >= 0) S.task.items.splice(at, 1);
+  else S.task.items.push({ pid: b.id, pdf_id: S.pdf.id, pdf_name: S.pdf.name, pdf_path: S.pdf.path, page, label: b.label, bbox: b.bbox, stem: b.stem, manual: !!b.manual });
+  await saveTask(); drawBoxes(); renderItems();
+}
+async function loadTasks() {
+  const list = await api('tasks');
+  $('tasksel').innerHTML = '';
+  if (!list.length) $('tasksel').add(new Option('(아직 목록이 없습니다)', ''));
+  for (const t of list) $('tasksel').add(new Option(`${t.name} · ${t.count}문제`, t.id));
+  if (S.task) $('tasksel').value = S.task.id;
+}
+async function openTask(id) {
+  try { S.task = await api('tasks/' + id); } catch { S.task = null; }
+  localStorage.lastTask = S.task ? S.task.id : '';
+  $('taskname').value = S.task ? (S.task.name === S.task.id ? '' : S.task.name) : '';
+  S.ready = {};
+  renderItems(); drawBoxes(); watchReady();
+}
+$('tasksel').onchange = () => $('tasksel').value && openTask($('tasksel').value);
+$('newtask').onclick = async () => { S.task = null; await ensureTask(); $('taskname').value = ''; renderItems(); drawBoxes(); toast('새 목록을 시작합니다'); };
+$('taskname').onchange = async () => { await ensureTask(); S.task.name = $('taskname').value.trim() || S.task.id; await saveTask(); await loadTasks(); };
+
+function renderItems() {
+  const items = S.task ? S.task.items : [];
+  $('count').textContent = items.length + '개' + (S.task ? ' · ' + S.task.id : '');
+  const opt = S.task && [...$('tasksel').options].find(o => o.value === S.task.id);
+  if (opt) opt.textContent = `${S.task.name} · ${items.length}문제`;
+  const box = $('items'); box.innerHTML = '';
+  if (!items.length) { box.innerHTML = '<div class="empty">아직 담은 문제가 없습니다.<br>가운데 화면에서 문제를 클릭하세요.</div>'; return; }
+  items.forEach((it, i) => {
+    const el = document.createElement('div'); el.className = 'item'; el.draggable = true;
+    const rects = [it.stem, it.bbox].filter(Boolean).map(r => r.join(',')).join(';');
+    el.innerHTML = `<div class="no">${i + 1}</div><div><div class="src"></div><img loading="lazy" src="/api/crop?pdf=${it.pdf_id}&page=${it.page}&rects=${rects}"></div><button class="x" title="빼기">✕</button>`;
+    el.querySelector('.src').textContent = `${it.pdf_name} · ${it.page}쪽 · ${it.label}`;
+    const rd = document.createElement('span'); rd.className = 'rd'; rd.dataset.pid = it.pid;
+    el.querySelector('.src').appendChild(rd);
+    el.querySelector('.src').onclick = () => openPdf(it.pdf_id, it.page);
+    el.querySelector('.x').onclick = async () => { S.task.items.splice(i, 1); await saveTask(); renderItems(); drawBoxes(); };
+    el.ondragstart = e => { e.dataTransfer.setData('text/plain', i); el.classList.add('drag'); };
+    el.ondragend = () => el.classList.remove('drag');
+    el.ondragover = e => { e.preventDefault(); el.classList.add('over'); };
+    el.ondragleave = () => el.classList.remove('over');
+    el.ondrop = async e => { e.preventDefault(); const from = +e.dataTransfer.getData('text/plain');
+      const [m] = S.task.items.splice(from, 1); S.task.items.splice(i, 0, m); await saveTask(); renderItems(); drawBoxes(); };
+    box.appendChild(el);
+  });
+  paintReady();
+}
+async function copy(text, done) {
+  try { await navigator.clipboard.writeText(text); }
+  catch { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  toast(done);
+}
+$('copytask').onclick = () => {
+  if (!S.task || !S.task.items.length) return toast('먼저 문제를 담으세요');
+  copy(`HWPick 태스크 ${S.task.id} (문제 ${S.task.items.length}개)`, '복사했습니다. 에이전트 채팅에 붙여 넣으세요.');
+};
+$('copyids').onclick = () => {
+  if (!S.task || !S.task.items.length) return toast('먼저 문제를 담으세요');
+  copy(S.task.items.map(it => it.pid).join(', '), '문항 ID를 복사했습니다');
+};
+
+(async () => {
+  await loadLibrary(); await loadTasks();
+  if (localStorage.lastTask) await openTask(localStorage.lastTask); else renderItems();
+  if (S.task) $('tasksel').value = S.task.id;
+  if (localStorage.lastPdf && S.pdfs.some(p => p.id === localStorage.lastPdf)) openPdf(localStorage.lastPdf);
+})();
+</script>
+</body>
+</html>
