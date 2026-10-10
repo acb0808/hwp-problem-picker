@@ -23,7 +23,9 @@ echo  [1/4] 설치 도구 확인됨
 rem ---- 2. 파이썬 환경과 필요한 프로그램 모듈
 :venv
 echo  [2/4] 필요한 프로그램 모듈을 설치합니다. 몇 분 걸릴 수 있습니다.
-if exist ".venv\Scripts\python.exe" goto :install
+if exist ".venv\pyvenv.cfg" if exist ".venv\Scripts\python.exe" goto :install
+rem 설치가 도중에 끊겨 반쯤 만들어진 환경이 남아 있으면 지우고 새로 만든다(그대로 두면 다음 설치가 계속 실패한다)
+if exist ".venv" rmdir /s /q ".venv"
 uv venv .venv --python 3.12
 if errorlevel 1 goto :fail
 :install
