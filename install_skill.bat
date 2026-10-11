@@ -3,10 +3,10 @@ chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
-rem 에이전트의 스킬 폴더에 이 폴더로 가는 연결(바로가기 폴더)을 만든다.
-rem 파일을 복사하지 않으므로, 이 폴더를 고치면 스킬에도 바로 반영된다.
+rem 에이전트의 스킬 폴더에 이 스킬을 넣는다(SKILL.md 한 장이 든 폴더. 그 안에 이 폴더의 위치가 적힌다).
+rem SKILL.md를 고치거나 업데이트한 뒤에는 이 파일을 다시 실행해야 스킬 폴더에도 반영된다.
 rem
-rem   install_skill.bat               설치되어 있는 에이전트 모두에 연결
+rem   install_skill.bat               설치되어 있는 에이전트 모두에
 rem   install_skill.bat antigravity   안티그래비티에만
 rem   install_skill.bat opencode      opencode에만
 rem
@@ -66,39 +66,15 @@ exit /b 0
 echo  안티그래비티: 옮겨 적기 담당 서브에이전트를 넣지 못했습니다(없어도 스킬은 동작합니다).
 exit /b 0
 
-rem ---- 스킬 폴더 하나에 연결한다: call :link "이름" "스킬 폴더"
+rem ---- 스킬 폴더 하나에 넣는다: call :link "이름" "스킬 폴더"
+rem      SKILL.md 한 장이 든 진짜 폴더를 만든다(안티그래비티는 연결된 폴더를 스킬로 읽지 않는다)
 :link
-call :old_link "%~1" "%~2"
-set "TARGET=%~2\hwp-problem-picker"
-if exist "%TARGET%\SKILL.md" goto :link_already
-if exist "%TARGET%" goto :link_occupied
-if not exist "%~2" mkdir "%~2"
-mklink /J "%TARGET%" "%HERE%" >nul
-if errorlevel 1 goto :link_fail
-echo  %~1: 연결했습니다.
+".venv\Scripts\python.exe" -m hwpick.skilldir "%~1" "%~2"
+if errorlevel 1 goto :link_bad
 set /a DONE+=1
 exit /b 0
-:link_already
-echo  %~1: 이미 연결되어 있습니다.
-set /a DONE+=1
-exit /b 0
-:link_occupied
-echo  %~1: %TARGET% 에 다른 폴더가 있어 연결하지 않았습니다. 그 폴더를 확인해 주세요.
+:link_bad
 set /a BAD+=1
-exit /b 0
-:link_fail
-echo  %~1: 연결하지 못했습니다. 위의 오류 내용을 알려 주세요.
-set /a BAD+=1
-exit /b 0
-
-rem ---- 예전 이름(hwpick)으로 만든 연결이 이 폴더를 가리키면 지운다(연결만 지운다. 다른 곳을 가리키면 그대로 둔다)
-:old_link
-set "OLD=%~2\hwpick"
-if not exist "%OLD%\SKILL.md" exit /b 0
-".venv\Scripts\python.exe" -c "import os,sys; a,b=[os.path.normcase(os.path.realpath(p)) for p in sys.argv[1:3]]; sys.exit(0 if os.path.isjunction(sys.argv[1]) and a==b else 1)" "%OLD%" "%HERE%"
-if errorlevel 1 exit /b 0
-rmdir "%OLD%"
-echo  %~1: 예전 이름^(hwpick^)의 연결을 지웠습니다.
 exit /b 0
 
 :need_setup
@@ -109,7 +85,7 @@ exit /b 1
 
 :usage
 echo  알 수 없는 이름입니다: %WHO%
-echo  antigravity 또는 opencode 를 쓰거나, 아무것도 붙이지 않으면 모두에 연결합니다.
+echo  antigravity 또는 opencode 를 쓰거나, 아무것도 붙이지 않으면 모두에 넣습니다.
 if not defined HWPICK_NO_PAUSE pause
 exit /b 1
 
@@ -119,6 +95,6 @@ if not defined HWPICK_NO_PAUSE pause
 exit /b 1
 
 :fail
-echo  연결하지 못한 곳이 있습니다. 위의 내용을 확인해 주세요.
+echo  넣지 못한 곳이 있습니다. 위의 내용을 확인해 주세요.
 if not defined HWPICK_NO_PAUSE pause
 exit /b 1

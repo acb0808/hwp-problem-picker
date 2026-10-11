@@ -50,7 +50,7 @@ $env:HWPICK_NO_PAUSE="1"; & "$env:USERPROFILE\hwp-problem-picker\setup.bat"
 
 이 명령은 설치 도구(uv)를 받고, 설치 폴더 안에 파이썬 환경(`.venv`)을 만들고, 글자 인식 모델을 내려받고, 한글 자동화 보안 모듈을 현재 사용자에게 등록한다(이미 등록되어 있으면 그대로 둔다).
 
-## 4. 안티그래비티에 연결
+## 4. 안티그래비티에 넣기
 
 ```powershell
 $env:HWPICK_NO_PAUSE="1"; & "$env:USERPROFILE\hwp-problem-picker\install_skill.bat" antigravity
@@ -58,7 +58,7 @@ $env:HWPICK_NO_PAUSE="1"; & "$env:USERPROFILE\hwp-problem-picker\install_skill.b
 
 이 명령은 두 가지를 한다.
 
-- `%USERPROFILE%\.gemini\config\skills\hwp-problem-picker` 에 설치 폴더로 가는 연결(바로가기 폴더)을 만든다. 파일을 복사하지 않는다. 예전 이름(`hwpick`)으로 만든 연결이 같은 설치 폴더를 가리키고 있으면 그 연결만 지운다.
+- `%USERPROFILE%\.gemini\config\skills\hwp-problem-picker` 폴더를 만들고 `SKILL.md` 한 장을 넣는다. 설치 폴더의 `SKILL.md`에 설치 폴더의 위치를 적어 넣은 복사본이다(안티그래비티는 바로가기로 연결한 폴더를 스킬로 읽지 않아서 이렇게 한다). 예전 판이 만든 연결(`skills\hwpick`, `skills\hwp-problem-picker`)이 같은 설치 폴더를 가리키고 있으면 그 연결만 지운다.
 - `%USERPROFILE%\.gemini\config\agents\` 에 `hwpick-reader.md`, `hwpick-dispatch.md` 두 파일을 넣는다. 문제를 읽는 가벼운 서브에이전트의 정의다(명령을 실행하지 못하고 Flash Lite 모델로 돈다).
 
 안티그래비티가 다른 스킬 폴더를 쓰는 것이 확인되면, `HWPICK_SKILLS_DIR` 환경 변수에 그 폴더를 주고 같은 명령을 실행한다. 확인되지 않으면 위의 기본 위치를 그대로 쓴다.
@@ -69,7 +69,12 @@ $env:HWPICK_NO_PAUSE="1"; & "$env:USERPROFILE\hwp-problem-picker\install_skill.b
 & "$env:USERPROFILE\hwp-problem-picker\.venv\Scripts\python.exe" -m hwpick doctor
 ```
 
-모든 줄이 `[준비됨]`이면 끝이다. `[필요함]`이 있으면 그 줄과 안내(`→`)를 사용자에게 그대로 전한다.
+모든 줄이 `[준비됨]`이고, 아래가 `True`이면 끝이다.
+
+```powershell
+Test-Path "$env:USERPROFILE\.gemini\config\skills\hwp-problem-picker\SKILL.md"
+```
+`[필요함]`이 있으면 그 줄과 안내(`→`)를 사용자에게 그대로 전한다.
 
 - `한글 자동화 보안 모듈`이 `[필요함]`이면 `doctor --fix`를 한 번 실행한다. 그래도 안 되면 안내 문구를 그대로 전한다.
 
@@ -90,13 +95,13 @@ git -C "$env:USERPROFILE\hwp-problem-picker" pull
 
 `git`으로 받은 폴더가 아니면(`.git` 폴더가 없으면) 2번의 압축 파일 방식으로 새로 받아, `.venv` 폴더만 남기고 나머지 파일을 덮어쓴다.
 
-그다음 3번(설치)과 4번(연결)을 한 번 더 실행한다. 서브에이전트 정의 두 파일은 복사본이라 다시 넣어야 새 내용이 적용된다. 끝나면 5번(점검)을 하고, 안티그래비티를 다시 켜라고 알린다.
+그다음 3번(설치)과 4번(넣기)을 한 번 더 실행한다. 스킬 폴더의 `SKILL.md`와 서브에이전트 정의 두 파일은 복사본이라 다시 넣어야 새 내용이 적용된다. 끝나면 5번(점검)을 하고, 안티그래비티를 다시 켜라고 알린다.
 
 ## 제거
 
 사용자가 지워 달라고 할 때만 한다. 지우기 전에 무엇을 지우는지 알리고 확인을 받는다.
 
-- `%USERPROFILE%\.gemini\config\skills\hwp-problem-picker` 와, 남아 있다면 예전 이름의 `skills\hwpick` (연결만 지운다. 연결이 가리키는 폴더의 내용을 지우지 않게 주의한다)
+- `%USERPROFILE%\.gemini\config\skills\hwp-problem-picker` 폴더(`SKILL.md` 한 장만 들어 있다). 예전 판이 만든 연결 `skills\hwpick`이 남아 있으면 그것도 지우되, 연결만 지운다(연결이 가리키는 폴더의 내용을 지우지 않게 주의한다)
 - `%USERPROFILE%\.gemini\config\agents\hwpick-reader.md`, `hwpick-dispatch.md`
 - `%USERPROFILE%\hwp-problem-picker` 폴더
 - 교재를 읽어 둔 캐시 `%LOCALAPPDATA%\HWPick`
