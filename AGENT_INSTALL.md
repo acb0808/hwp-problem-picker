@@ -42,7 +42,7 @@ Move-Item "$env:TEMP\hwp-problem-picker-unzip\hwp-problem-picker-main" "$env:USE
 
 ## 3. 설치
 
-필요한 프로그램을 내려받느라 5~10분 걸린다. **명령 제한 시간을 15분(900000ms)으로 준다.** `HWPICK_NO_PAUSE`를 주지 않으면 끝에서 키 입력을 기다리며 멈춘다. 스크립트는 아래처럼 **전체 경로로** 부른다(폴더로 들어가서 이름만 치면 못 찾는 PC가 있다). 두 명령을 **한 줄로** 실행한다(따로 실행하면 앞의 설정이 사라져 멈춘다).
+필요한 프로그램을 내려받느라 5\~10분 걸린다. **명령 제한 시간을 15분(900000ms)으로 준다.** `HWPICK_NO_PAUSE`를 주지 않으면 끝에서 키 입력을 기다리며 멈춘다. 스크립트는 아래처럼 **전체 경로로** 부른다(폴더로 들어가서 이름만 치면 못 찾는 PC가 있다). 두 명령을 **한 줄로** 실행한다(따로 실행하면 앞의 설정이 사라져 멈춘다).
 
 ```powershell
 $env:HWPICK_NO_PAUSE="1"; & "$env:USERPROFILE\hwp-problem-picker\setup.bat"
