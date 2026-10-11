@@ -6,9 +6,8 @@ cd /d "%~dp0"
 rem 에이전트의 스킬 폴더에 이 스킬을 넣는다(SKILL.md 한 장이 든 폴더. 그 안에 이 폴더의 위치가 적힌다).
 rem SKILL.md를 고치거나 업데이트한 뒤에는 이 파일을 다시 실행해야 스킬 폴더에도 반영된다.
 rem
-rem   install_skill.bat               설치되어 있는 에이전트 모두에
-rem   install_skill.bat antigravity   안티그래비티에만
-rem   install_skill.bat opencode      opencode에만
+rem   install_skill.bat               안티그래비티에
+rem   install_skill.bat antigravity   위와 같다
 rem
 rem 스킬 폴더가 다른 곳에 있으면 HWPICK_SKILLS_DIR 환경 변수로 알려 줄 수 있다.
 
@@ -21,12 +20,10 @@ if not exist ".venv\Scripts\python.exe" goto :need_setup
 echo.
 if defined HWPICK_SKILLS_DIR goto :custom
 if /i "%WHO%"=="antigravity" goto :antigravity
-if /i "%WHO%"=="opencode" goto :opencode
 if not "%WHO%"=="" goto :usage
 
 if exist "%USERPROFILE%\.gemini" call :link "안티그래비티" "%USERPROFILE%\.gemini\config\skills"
 if exist "%USERPROFILE%\.gemini" call :agent
-if exist "%USERPROFILE%\.config\opencode" call :link "opencode" "%USERPROFILE%\.config\opencode\skills"
 goto :summary
 
 :custom
@@ -37,10 +34,6 @@ goto :summary
 :antigravity
 call :link "안티그래비티" "%USERPROFILE%\.gemini\config\skills"
 call :agent
-goto :summary
-
-:opencode
-call :link "opencode" "%USERPROFILE%\.config\opencode\skills"
 goto :summary
 
 :summary
@@ -85,12 +78,12 @@ exit /b 1
 
 :usage
 echo  알 수 없는 이름입니다: %WHO%
-echo  antigravity 또는 opencode 를 쓰거나, 아무것도 붙이지 않으면 모두에 넣습니다.
+echo  아무것도 붙이지 않거나 antigravity 라고 쓰면 안티그래비티에 넣습니다.
 if not defined HWPICK_NO_PAUSE pause
 exit /b 1
 
 :none
-echo  안티그래비티도 opencode도 찾지 못했습니다. 에이전트를 먼저 설치해 주세요.
+echo  안티그래비티를 찾지 못했습니다. 안티그래비티를 먼저 설치해 주세요.
 if not defined HWPICK_NO_PAUSE pause
 exit /b 1
 

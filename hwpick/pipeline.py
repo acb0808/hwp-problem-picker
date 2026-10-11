@@ -760,7 +760,7 @@ def _clean(text: str) -> str:
 
 
 def _written(text: str, p: dict) -> str:
-    """서브에이전트가 쓴 글이면, 모델을 직접 불러 받은 글과 같은 방식으로 다듬는다(글 속의 맨몸 수를 수식으로 감싼다).
+    """서브에이전트가 쓴 글이면 다듬는다(글 속의 맨몸 수를 수식으로 감싼다).
     이미 다듬어 저장해 둔 글이나 한글 문서에서 꺼낸 글은 그대로 둔다."""
     if p.get("ready") or "store" in p:
         return text
@@ -903,40 +903,18 @@ def _from_reading(folder: Path, blocks: list) -> list:
 
 
 class NoReader(Exception):
-    """모델을 직접 부를 수단이 없다. 서브에이전트에게 맡기는 길(prepare → check → build)로 가야 한다."""
-
-
-def _ask_server(ws: Path, task_id: str) -> dict[str, str]:
-    """선택 화면 서버가 떠 있으면 미리 옮겨 적기를 시키고, 문제(pid)별 상태를 받는다. 없으면 빈 것."""
-    import urllib.request
-    try:
-        port = json.loads((tasks.data_dir(ws) / "server.json").read_text(encoding="utf-8"))["port"]
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=0.5) as r:
-            ping = json.loads(r.read().decode("utf-8"))
-        if ping.get("app") != "hwpick" or Path(ping["workspace"]) != ws:
-            return {}
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/tasks/{task_id}/ready", timeout=5) as r:
-            res = json.loads(r.read().decode("utf-8"))
-        return res["states"] if res.get("available") else {}
-    except Exception:
-        return {}
+    """그림을 읽어야 하는 문제가 있다. 서브에이전트에게 맡기는 길(prepare → check → build)로 가야 한다."""
 
 
 def make(workspace: str | Path, task_id: str, template: str | Path | None = None, name: str | None = None,
          title: str | None = None, wait: float | None = None, preview: bool = False, again: bool = False) -> dict:
-    """고른 문제를 한글 파일로 만드는 일을 한 번에 끝낸다(빠른 길).
+    """고른 문제의 글이 모두 준비되어 있으면 한글 파일을 바로 만든다.
 
-    문제의 글은 store에서 가져온다. 선택 화면이 미리 옮겨 적어 둔 문제는 바로 쓰고, 선택 화면이 지금 옮겨
-    적고 있는 문제는 끝나기를 기다린다. 그 밖의 문제만 여기서 모델을 직접 불러 한꺼번에 옮겨 적는다(서버를
-    새로 띄워야 해서 더 느리다). 그사이 한글을 띄워 두었다가 글이 모이면 문서를 만든다.
-    wait(초)는 아직 준비되지 않은 문제를 기다려 주는 한도다. 보통은 몇 초면 오지만 가끔 요청이 늘어진다.
-    한도를 넘긴 문제는 문제 그림을 통째로 넣고 그 사실을 알린다. 모델이 두 번 시도하고도
-    검사를 통과하지 못한 문제는 다시 시키지 않고 그림으로 넣는다(again이면 그런 문제도 다시 시킨다).
+    문제의 글은 store에서 가져온다. 한글 문서에서 고른 문제는 문서에 든 글·수식·그림을 그대로 꺼내 두므로
+    여기서 바로 만들 수 있다. 그림을 읽어야 하는 문제(교재의 문제)가 하나라도 있으면 NoReader를 올린다:
+    엔진은 모델을 부르지 않고, 옮겨 적는 일은 에이전트의 가벼운 서브에이전트가 맡는다.
+    again이면 검사를 통과하지 못한 채 저장된 문제도 다시 읽혀야 하는 것으로 친다. wait는 쓰지 않는다(예전 인자).
     """
-    import threading
-    from concurrent.futures import ThreadPoolExecutor
-
-    from . import reader as readers
     from . import store
     from .hwp import writer
 
@@ -949,59 +927,20 @@ def make(workspace: str | Path, task_id: str, template: str | Path | None = None
     tpl = find_template(ws, template)
     folders = [store.folder(ws, it) for it in items]
     lifted = lift_documents(ws, items)
-    missing = [i for i, f in enumerate(folders) if store.load(f) is None or (again and not store.ready(f))]
-    known = {i: store.load(folders[i]) for i in missing}        # 다시 시키는 문제의 예전 결과(새 결과와 구별하려고)
-    rd, pool, prep = None, None, None
-    futures: dict[int, object] = {}
-    trouble: dict[int, str] = {}
-    if wait is None:
-        wait = 40.0 + 1.5 * len(missing)             # 문제가 많으면 그만큼 더 기다려 준다(한 번에 열두 문제쯤 옮긴다)
-    deadline = t0 + wait
-    if missing and not readers.available(ws):
-        raise NoReader("opencode가 없거나, 직접 부르지 않도록 설정되어 있습니다")
-    states = _ask_server(ws, task_id) if missing else {}
-    mine = [i for i in missing if states.get(items[i]["pid"]) != "working"]      # 선택 화면이 하고 있지 않은 것만 직접 한다
-    if mine:
-        rd = readers.Reader(*readers.settings(ws))
-        rd.start()
-        pool = ThreadPoolExecutor(max_workers=len(mine))
-
-        def crop_and_send() -> None:
-            indexes: dict = {}
-            for i in mine:
-                it = items[i]
-                try:
-                    idx = _index(it, indexes)
-                    store.prepare(folders[i], it, idx)
-                    futures[i] = pool.submit(store.read, folders[i], it, idx, rd, deadline)
-                except Exception as e:
-                    trouble[i] = f"{type(e).__name__}: {e}"
-
-        prep = threading.Thread(target=crop_and_send, daemon=True)
-        prep.start()
-    # 한글을 띄운다(2초쯤). 그사이 다른 스레드가 문제 그림을 자르고 모델의 답을 받는다
+    if any(store.load(f) is None or (again and not store.ready(f)) for f in folders):
+        raise NoReader("그림을 읽어야 하는 문제가 있습니다")
     session = writer.Session().__enter__()
     try:
-        while missing and time.time() < deadline:
-            waiting = [i for i in missing if i not in trouble and store.load(folders[i]) == known[i]
-                       and not (i in futures and futures[i].done())]
-            if not waiting and not (prep is not None and prep.is_alive()):
-                break
-            time.sleep(0.05)
-        read_seconds = time.time() - t0
-        if rd is not None:
-            threading.Thread(target=rd.stop, daemon=True).start()       # 문서를 만드는 동안 서버를 끈다
         run = run_dir(ws, task_id)
         if run.exists():
             shutil.rmtree(run)
         problems = []
         redo: dict[str, object] = {}
         for n, (it, src) in enumerate(zip(items, folders), 1):
-            i = n - 1
             dst = run / "problems" / f"{n:02d}"
             dst.mkdir(parents=True)
             if not (src / "clean.png").is_file():
-                raise FileNotFoundError(f"{n}번째 문제의 그림을 만들지 못했습니다: {trouble.get(i, '알 수 없는 까닭')}")
+                raise FileNotFoundError(f"{n}번째 문제의 그림이 없습니다")
             shutil.copyfile(src / "clean.png", dst / "clean.png")
             st = store.load(src)
             stale = st is not None and st.get("local") != store.LOCAL and st.get("answer", "").strip()
@@ -1010,15 +949,11 @@ def make(workspace: str | Path, task_id: str, template: str | Path | None = None
                 st = store.refresh(src, it, _index(it, redo))
             entry = {"n": n, "pid": it["pid"], "from": f"{it['pdf_name']} {it['page']}쪽 {it['label']}",
                      "folder": f"problems/{n:02d}", "figures": [], "store": src.name,
-                     "fresh": i in missing, "notes": [],
+                     "fresh": False, "notes": [],
                      # 글로 옮기지 못해 통째로 붙일 때 스캔 해상도로 다시 자르는 데 쓴다(_whole_scan)
                      "pdf_path": it["pdf_path"], "pdf_id": it["pdf_id"], "page": it["page"], "bbox": it["bbox"], "stem": it.get("stem")}
             if st is None:
-                err = trouble.get(i)
-                if err is None and i in futures and futures[i].done() and futures[i].exception() is not None:
-                    e = futures[i].exception()
-                    err = "모델의 답이 제때 오지 않았습니다" if isinstance(e, TimeoutError) else f"{type(e).__name__}: {e}"
-                entry["notes"].append(err or "모델의 답이 제때 오지 않았습니다")
+                entry["notes"].append("준비해 둔 글을 읽지 못했습니다")
             else:
                 if "reading" not in st and st["status"] == "ok":
                     try:
@@ -1049,13 +984,8 @@ def make(workspace: str | Path, task_id: str, template: str | Path | None = None
         result = build(ws, task_id, tpl, name, title, session=session, preview=preview)
     finally:
         session.__exit__(None, None, None)
-        if rd is not None:
-            rd.stop()
-        if pool is not None:
-            pool.shutdown(wait=False, cancel_futures=True)
     result.update({"report": report, "problems": problems, "total_seconds": round(time.time() - t0, 1),
-                   "read_seconds": round(read_seconds, 1), "already": len(items) - len(missing), "fresh": len(missing),
-                   "by_server": len(missing) - len(mine), "lifted": lifted,
-                   "requests": rd.calls if rd is not None else 0})
+                   "read_seconds": 0.0, "already": len(items), "fresh": 0, "by_server": 0, "lifted": lifted,
+                   "requests": 0})
     (run / "build.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
     return result

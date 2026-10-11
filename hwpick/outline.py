@@ -1,11 +1,9 @@
 """교재의 뼈대: 어느 쪽부터 어느 쪽까지가 어느 단원의 어느 구획인가.
 
 "1단원 문제들 중에 B단계만 모아 줘" 같은 말을 들어주려면 이것을 알아야 한다. 스캔한 교재에는 책갈피도
-글자도 없어서 모델에게 그림을 보여 주고 알아낸다. 교재마다 한 번만 해서 저장해 둔다.
-
-    ① 쪽들을 작게 줄여 여덟 쪽씩 한 장에 모은 그림으로, 쪽마다 종류와 "여기서 시작하는 구획"을 묻는다.
-    ② 차례 쪽을 큰 그림으로 읽어 단원의 이름과 시작 쪽을 얻는다(줄인 그림에서는 단원 이름이 안 읽힌다).
-    ③ 구획 이름은 종류마다 한 쪽씩 큰 그림으로 다시 읽어 바로잡는다(줄인 그림에서는 쪽마다 다르게 읽힌다).
+글자도 없어서 쪽 그림을 읽혀 알아낸다. 교재마다 한 번만 해서 저장해 둔다. 그림을 읽는 일은 에이전트의 가벼운
+서브에이전트가 맡는다(물음을 맡기고 답으로 뼈대를 짜는 것은 asks.py). 여기에는 물음의 지시문, 답을 푸는 도구,
+저장해 둔 뼈대로 구획 목록을 만들고 문제를 모으는 부분이 있다.
 
 여기서는 낱말의 뜻을 풀지 않는다. "B단계"가 어느 구획인지는 뼈대 목록을 읽은 에이전트가 정하고,
 문제를 모으는 일은 이 PC에서 찾아 둔 박스로 한다(모델을 쓰지 않는다).
@@ -23,9 +21,7 @@ VERSION = 12
 PER_SHEET = 8              # 그림 한 장에 모으는 쪽 수
 COLUMNS = 4
 THUMB_WIDTH = 450          # 쪽 하나의 폭(픽셀). 큰 제목과 구획 이름표가 읽히는 크기
-WORKERS = 12
 CAREFUL = "low"            # 차례와 구획 이름처럼 몇 번 안 묻지만 틀리면 안 되는 것은 추론을 한 단계 올려 읽힌다
-SLOW = (30.0, 30.0)        # 여러 쪽을 모은 그림은 답이 10~20초 걸린다. 그보다 훨씬 늦을 때만 같은 요청을 더 보낸다
 KINDS = ("표지", "목차", "단원표지", "개념", "문제", "해설", "기타")
 NONE_WORDS = ("-", "–", "—", "없음", "")
 
@@ -151,11 +147,6 @@ def parse(text: str, pages: list[int]) -> dict[int, list[str]]:
     return out
 
 
-def _stage_key(name: str) -> str:
-    """구획 이름에서 앞의 글자 표시와 띄어쓰기를 뺀 것(같은 구획인지 견줄 때 쓴다)."""
-    return re.sub(r"^(?:[A-Za-z]|STEP\s*\d+|Step\s*\d+|[0-9]{1,2})(?=[\s가-힣])", "", name.strip()).replace(" ", "")
-
-
 def _alike(a: str, b: str, floor: float = 0.7) -> bool:
     return bool(a and b) and (a == b or difflib.SequenceMatcher(None, a, b).ratio() >= floor)
 
@@ -188,67 +179,6 @@ def _same_stage(a: str, b: str, floor: float = 0.7) -> bool:
     if ia and ia == ib and (ta in tb or tb in ta):
         return True                                     # 'STEP 2'와 'STEP 2 | 내신발전'
     return _alike(ta, tb, floor)
-
-
-def _clusters(names: dict[int, str]) -> list[list[int]]:
-    """구획 시작 쪽들을 같은 구획끼리 묶는다. 줄인 그림에서는 같은 이름도 쪽마다 조금씩 다르게 읽힌다.
-
-    글자 하나까지 똑같이 두 번 이상 읽힌 이름은 실제로 있는 이름이다(잘못 읽은 것은 쪽마다 다르게 틀린다).
-    그런 이름끼리는 비슷해도 묶지 않는다: '중단원 EXERCISES'와 '대단원 EXERCISES'는 다른 구획이다.
-    한 번만 읽힌 이름은 가장 비슷한 것에 붙인다.
-    """
-    exact: dict[tuple, list[int]] = {}
-    for p in sorted(names):
-        exact.setdefault((tuple(_indexes(names[p])), _text(names[p])), []).append(p)
-    # 차례 표시가 안 읽힌 이름('실력 굳히기')은, 글자가 같고 표시가 붙은 이름이 하나뿐이면('C 실력 굳히기') 그것과 같다
-    marks: dict[str, set[tuple]] = {}
-    for idx, text in exact:
-        if idx:
-            marks.setdefault(text, set()).add(idx)
-    joined: dict[tuple, list[int]] = {}
-    for (idx, text), g in exact.items():
-        key = (next(iter(marks[text])), text) if not idx and len(marks.get(text, ())) == 1 else (idx, text)
-        joined.setdefault(key, []).extend(g)
-    exact = joined
-    groups = [list(g) for g in exact.values() if len(g) >= 2]
-    sure = len(groups)
-    for g in exact.values():
-        if len(g) >= 2:
-            continue
-        p = g[0]
-        fits = [k for k, o in enumerate(groups) if _same_stage(names[p], names[o[0]])]
-        if fits:
-            best = max(fits, key=lambda k: (k < sure, difflib.SequenceMatcher(None, _text(names[p]), _text(names[groups[k][0]])).ratio()))
-            groups[best].append(p)
-        else:
-            groups.append([p])
-    return sorted((sorted(g) for g in groups), key=lambda g: g[0])
-
-
-def _read_toc(idx, reader, pages: list[list[str]], deadline: float | None) -> list[dict]:
-    """차례 쪽을 큰 그림으로 읽어 단원 목록을 얻는다: [{"path": [큰 단원, …, 그 단원], "printed": 쪽}…]. 못 읽으면 빈 목록."""
-    candidates = [p for p in range(min(len(pages), 24)) if pages[p][0] == "목차"][:4]
-    units: list[dict] = []
-
-    def read(p: int) -> str:
-        return reader.ask(TOC_PROMPT, idx.page_file(p).read_bytes(), deadline, mime="image/jpeg", hedge=SLOW,
-                          variant=CAREFUL)
-
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        texts = _all(ex, read, candidates)
-    for text in texts:
-        for line in text.splitlines():
-            parts = _cells(line)
-            if len(parts) < 2 or not re.fullmatch(r"\d{1,3}", parts[-1]):
-                continue
-            path = [s.strip() for s in " | ".join(parts[:-1]).replace("|", ">").split(">") if s.strip() not in NONE_WORDS]
-            if path:
-                units.append({"path": path, "printed": int(parts[-1])})
-    kept: list[dict] = []                               # 쪽 번호가 뒤로 가는 줄은 잘못 읽은 것이다
-    for u in units:
-        if not kept or u["printed"] > kept[-1]["printed"]:
-            kept.append(u)
-    return _tidy_paths(kept) if len(kept) >= 2 else []
 
 
 def _tidy_paths(units: list[dict]) -> list[dict]:
@@ -296,155 +226,6 @@ def _offset(idx, reader, deadline: float | None) -> int | None:
         return None
     best = max(set(diffs), key=diffs.count)
     return best if diffs.count(best) >= 2 else None
-
-
-def build(idx, reader, deadline: float | None = None) -> dict:
-    """교재 전체의 뼈대를 모델에게 물어 저장한다. 이미 있으면 그것을 돌려준다."""
-    data = load(idx)
-    if data is not None:
-        return data
-    started, cost0, calls0 = time.time(), reader.cost, reader.calls
-    groups = [list(range(i, min(i + PER_SHEET, idx.page_count))) for i in range(0, idx.page_count, PER_SHEET)]
-
-    def one(group: list[int]) -> dict[int, list[str]]:
-        image = sheet(idx, group)
-        got: dict[int, list[str]] = {}
-        for _ in range(2):                              # 쪽이 빠진 답이 오면 한 번 더 물어본다
-            got.update(parse(reader.ask(PROMPT, image, deadline, mime="image/jpeg", hedge=SLOW), group))
-            if len(got) == len(group):
-                break
-        return got
-
-    reads: dict[str, list[str]] = {}                    # 큰 그림으로 다시 읽은 쪽 → 읽힌 제목들(나중에 따져 보려고 남긴다)
-
-    def read_name(p: int) -> list[str]:
-        """p쪽(1부터)에서 새로 시작하는 구획의 제목들. 위에서부터."""
-        ans = reader.ask(NAME_PROMPT, idx.page_file(p - 1).read_bytes(), deadline, mime="image/jpeg")
-        lines = [s.strip().strip("`").strip() for s in ans.splitlines()]
-        reads[str(p)] = [s for s in lines if s and s not in NONE_WORDS][:6]
-        return reads[str(p)]
-
-    pages: list[list[str]] = [["기타", "", ""] for _ in range(idx.page_count)]
-    missing = 0
-    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        for group, got in zip(groups, _all(ex, one, groups)):
-            missing += len(group) - len(got)
-            for p, info in got.items():
-                pages[p] = info
-        units = _read_toc(idx, reader, pages, deadline)
-        offset = _offset(idx, reader, deadline) if units else None
-        if offset is None:
-            units = []
-        names = {p: sec for p, (_, _, sec) in enumerate(pages, 1) if sec}
-        clusters = _clusters(names)
-        # 구획(단계)은 단원마다 되풀이된다. 여러 단원에 나오는 이름만 구획으로 삼는다: 줄인 그림에서는 유형 제목 같은
-        # 소제목도 구획처럼 읽혀 오는데, 그런 것은 이름이 단원마다 달라서 되풀이되지 않는다
-        starts_of_units = [u["printed"] + offset for u in units]
-
-        def unit_of(p: int) -> int:
-            return sum(1 for s in starts_of_units if s <= p)
-
-        def recurring(g: list[int]) -> bool:
-            return len({unit_of(p) for p in g}) >= 2 if units else len(g) >= 3
-
-        stages = [g for g in clusters if recurring(g)]
-        loose = sorted(p for g in clusters if not recurring(g) for p in g)
-        # 줄인 그림이 "이 쪽에서 구획이 시작한다"고 짚은 쪽을 모두 큰 그림으로 다시 읽어, 둘을 함께 쓴다.
-        # 줄인 그림만 믿으면 STEP 1이 STEP 2로, 한 쪽의 둘째 제목이 첫째 제목 대신 읽힌 쪽이 하나만 끼어도 그 단원의
-        # 구획이 통째로 틀린 이름을 단다. 큰 그림만 믿으면 구획 제목 대신 개념 소제목만 읽어 오는 쪽에서 구획을 잃는다.
-        probes = sorted(p for g in stages for p in g)
-        checked = dict(zip(probes, _all(ex, read_name, probes)))
-        titles = {(p, k): line for p in probes for k, line in enumerate(checked[p])}
-        known: dict[str, str] = {}                      # 구획의 (견줄 이름 → 큰 그림에서 읽은 표기)
-        canon: dict[tuple[int, int], str] = {}          # 큰 그림에서 읽힌 제목 가운데 여러 단원에 되풀이되는 것 → 표기
-        for g in _clusters(titles):
-            if not recurring(sorted({p for p, _ in g})):
-                continue
-            seen = [titles[x] for x in g]
-            seen = [s for s in seen if _indexes(s)] or seen         # 표시(A, B, C)가 읽힌 표기를 쓴다
-            name = max(sorted(set(seen)), key=seen.count)
-            if seen.count(name) == 1 and len(set(seen)) > 1:
-                # 'STEP UP Theme 1~3', 'STEP UP Theme 4~6'처럼 뒤쪽만 다른 이름은 같은 앞부분을 구획 이름으로 쓴다
-                x, y = seen[0].split(), seen[1].split()
-                head = x[:next((k for k, (v, w) in enumerate(zip(x, y)) if v != w), min(len(x), len(y)))]
-                name = " ".join(head) or seen[0]
-            known[_stage_key(name)] = name
-            for key in g:
-                canon[key] = name
-        guess: dict[int, str] = {}                      # 줄인 그림이 붙인 이름을 큰 그림의 표기로 옮긴 것
-        for g in stages:
-            votes = [canon[(p, k)] for p in g for k in range(len(checked[p]))
-                     if (p, k) in canon and _same_stage(titles[(p, k)], names[p], 0.5)]
-            for p in g:
-                guess[p] = max(sorted(set(votes)), key=votes.count) if votes else ""   # 어느 쪽에서도 확인되지 않으면 헛구획
-        unit, current = -1, ""
-        for p in probes:
-            if unit_of(p) != unit:
-                unit, current = unit_of(p), ""
-            found = [canon[(p, k)] for k in range(len(checked[p])) if (p, k) in canon]
-            if found:
-                # 앞쪽에서 이어지는 구획의 머리글도 제목으로 읽혀 온다. 지금 구획과 다른 첫 제목이 여기서 시작하는 구획이다
-                # (한 쪽에 구획 제목이 둘이면 위의 것)
-                fresh = [v for v in found if v != current]
-                # 단원 이름과 같은 제목('중단원 EXERCISES' 단원의 첫 쪽에 찍힌 그 제목)보다는 그 아래의 구획 제목을 쓴다
-                leaf = units[unit - 1]["path"][-1] if units and unit >= 1 else ""
-                inner = [v for v in fresh if not same(v, leaf)]
-                pages[p - 1][2] = (inner or fresh or found)[0]
-            else:
-                pages[p - 1][2] = guess[p]              # 큰 그림에서 제목을 못 읽은 쪽은 줄인 그림을 믿는다
-            current = pages[p - 1][2] or current
-        for p in loose:
-            pages[p - 1][2] = ""
-        # 어떤 단원에 구획 하나가 빠져 있으면, 그 자리에서 다른 이름으로 읽힌 쪽이 사실은 그 구획일 수 있다.
-        # 그런 쪽만 큰 그림으로 다시 읽는다(단원마다 몇 쪽)
-        if units and known:
-            bounds = starts_of_units + [len(pages) + 1]
-            in_unit = [{_stage_key(pages[p - 1][2]) for p in range(max(1, a), min(b, len(pages) + 1)) if pages[p - 1][2]}
-                       for a, b in zip(bounds, bounds[1:])]
-            # 여러 단원에 두루 있는 구획만 '빠졌다'고 본다(대단원 끝에만 있는 구획은 없는 단원이 많은 것이 정상이다).
-            # 단원 끝의 작은 구획('서술형 주관식')은 줄인 그림에서 절반쯤 놓치므로, 열에 넷 넘게 보이면 두루 있는 것으로 친다.
-            # 차례에 같은 이름으로 여러 번 나오는 단원('중단원 EXERCISES')은 저희끼리 짜임이 같으므로 따로 견준다
-            family = [_norm(u["path"][-1]) for u in units]
-            family = [f if family.count(f) >= 2 else "" for f in family]
-
-            def place(k: str, members: list[int]) -> float:
-                """그 구획이 단원 안에서 보통 어디쯤(0~1)에서 시작하는가."""
-                spots = [(p - bounds[i]) / max(1, bounds[i + 1] - bounds[i]) for i in members
-                         for p in range(max(1, bounds[i]), min(bounds[i + 1], len(pages) + 1))
-                         if _stage_key(pages[p - 1][2]) == k]
-                return sum(spots) / max(1, len(spots))
-
-            # 빠진 구획은 앞뒤 구획 사이의 어느 쪽에서 시작한다. 그 사이의 쪽들을 큰 그림으로 읽어 찾는다.
-            # (빠뜨리면 앞 구획이 뒤 구획의 문제까지 차지해 버린다)
-            suspects: list[int] = []
-            for fam in sorted(set(family)):
-                members = [i for i, f in enumerate(family) if f == fam]
-                need = max(2.0, 0.4 * len(members))
-                usual = {k for k in known if sum(1 for i in members if k in in_unit[i]) >= need}
-                order = sorted(usual, key=lambda k: place(k, members))
-                for m in members:
-                    a, b, have = max(1, bounds[m]), min(bounds[m + 1], len(pages) + 1), in_unit[m]
-                    found = {_stage_key(pages[p - 1][2]): p for p in range(b - 1, a - 1, -1) if pages[p - 1][2]}
-                    for i, k in enumerate(order):
-                        if k in have:
-                            continue
-                        lo = max([found[x] + 1 for x in order[:i] if x in found], default=a)
-                        hi = min([found[x] for x in order[i + 1:] if x in found], default=b)
-                        suspects += [p for p in range(lo, hi) if not pages[p - 1][2]][:8]
-            suspects = sorted(set(suspects))[:40]
-            for p, seen in zip(suspects, _all(ex, read_name, suspects)):
-                # 그 단원에 이미 있는 구획의 이름은 앞쪽에서 이어지는 머리글이다. 아직 없는 구획의 첫 제목을 쓴다
-                have = in_unit[unit_of(p) - 1] if unit_of(p) >= 1 else set()
-                match = next((v for line in seen for v in known.values()
-                              if _same_stage(v, line) and _stage_key(v) not in have), None)
-                if match:
-                    pages[p - 1][2] = match
-    data = {"version": VERSION, "pages": pages, "units": units, "offset": offset,
-            "bounds": {}, "reads": reads, "missing": missing, "requests": reader.calls - calls0,
-            "seconds": round(time.time() - started, 1), "cost": round(reader.cost - cost0, 5),
-            "model": f"{reader.provider}/{reader.model}", "at": time.strftime("%Y-%m-%d %H:%M:%S")}
-    _save(idx, data)
-    return data
 
 
 def _unspace(name: str) -> str:
@@ -572,6 +353,8 @@ def describe(idx, data: dict) -> list[str]:
             found = [(p, b["label"]) for p, page in zip(range(e["start"], e["end"] + 1), boxes) for b in page]
             labels = [v for _, v in found]
             opening = data.get("bounds", {}).get(f"{e['start']}:{e['section']}", "")
+            if opening and data.get("light") and not any(p == e["start"] and _label_key(v) == _label_key(opening) for p, v in found):
+                opening = ""
             cut = _restart(found, bool(e["section"]), e["start"], opening)
             if cut is not None:
                 extra = (f", 문제 {cut}개" + (f"({labels[0]}~{labels[cut - 1]})" if cut else "")
@@ -706,6 +489,9 @@ def collect(idx, data: dict | None, reader, get_boxes, section_ids: list[str] | 
                 # 구획이 쪽 중간에서 시작할 수 있다. 제목 다음의 첫 문제부터 넣는다
                 label = opening = boundary(idx, data, reader, p, e["section"])
                 at = index_of(boxes, label) if label else None
+                if at is None and data.get("light"):
+                    # 가벼운 모델이 읽어 준 번호는 그 쪽의 박스에 있을 때만 믿는다(개념 번호를 문제 번호로 적어 오는 일이 있다)
+                    label = opening = ""
                 if not boxes:
                     notes.append(f"{p}쪽: '{e['section']}' 구획이 시작하는 쪽인데 문제 박스를 하나도 찾지 못했습니다"
                                  + (f"(첫 문제는 {label})" if label else "") + ". 그 쪽의 문제는 빠졌습니다 — "
@@ -713,7 +499,8 @@ def collect(idx, data: dict | None, reader, get_boxes, section_ids: list[str] | 
                 elif at is None and label:
                     notes.append(f"{p}쪽: '{e['section']}' 구획의 첫 문제({label})를 박스에서 찾지 못해 그 쪽의 문제를 모두 넣었습니다")
                 boxes = boxes[at or 0:]
-            if not boxes and data and data["pages"][p - 1][0] == "문제" and not (e is not None and p == start):
+            # 가벼운 모델로 만든 뼈대는 쪽의 종류를 가리지 않으므로(모두 '문제') 빈 쪽을 알리지 않는다(단원 표지 등이 섞여 있다)
+            if not boxes and data and data["pages"][p - 1][0] == "문제" and not data.get("light") and not (e is not None and p == start):
                 empty.append(p)
             picked += [(p, b) for b in boxes]
         nxt = None

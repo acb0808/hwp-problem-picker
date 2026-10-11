@@ -2,7 +2,8 @@
 
     python -m hwpick open            문제 선택 화면을 띄운다(서버가 없으면 백그라운드로 켠다)
     python -m hwpick task show ID    고른 문제 목록을 본다
-    python -m hwpick make ID         고른 문제를 한글 파일로 한 번에 만든다(빠른 길)
+    python -m hwpick make ID         고른 문제를 한글 파일로 만든다(그림을 읽어야 하면 서브에이전트에게 맡길 인자를 낸다)
+    python -m hwpick finish ID       서브에이전트가 끝나기를 기다렸다가 검사하고 한글 파일을 만든다
 
 말로 범위를 정해 달라고 할 때("1단원 B단계만 모아 줘")는 클릭 대신 이 명령들로 목록을 만든다.
 
@@ -20,7 +21,7 @@
     python -m hwpick add 교재 --page 34 --box A:0412     그 영역을 문제로 담는다(덩어리 글자나 '왼쪽,위,오른쪽,아래')
     python -m hwpick drop ID 3,5                         목록에서 그 차례의 문제를 뺀다
 
-빠른 길을 쓸 수 없을 때(모델을 직접 부를 수단이 없을 때)는 서브에이전트에게 맡기는 세 단계로 한다.
+finish가 하는 일을 단계별로 따로 할 수도 있다.
 
     python -m hwpick prepare ID      문제 그림을 잘라 전사 지시문(batch-N.md)을 만든다
     python -m hwpick check ID        서브에이전트가 쓴 전사 결과를 검사한다
@@ -236,11 +237,10 @@ def cmd_pick(args) -> int:
     res = _api(port, "pick", {"pdf": book["id"], "sections": args.section or [], "pages": pages, "first": args.first,
                               "last": args.last, "numbers": numbers, "name": args.name or "", "dry": args.dry}, timeout=900)
     n, free = res["count"], res.get("free", 0)
-    from . import reader
     if n and free == n:
         cost = "문서에 든 내용을 그대로 꺼내므로 옮겨 적는 비용이 없습니다"
-    else:                                    # 달러 값은 엔진이 모델을 직접 부를 때만 뜻이 있다
-        cost = (f"옮겨 적는 비용 약 {(n - free) * 0.0004:.3f}달러" if reader.available(ws) else "옮겨 적기는 가벼운 서브에이전트가 맡습니다") \
+    else:
+        cost = "옮겨 적기는 가벼운 서브에이전트가 맡습니다" \
             + (f", {free}문제는 문서에서 그대로 꺼냅니다" if free else "")
     print(f"{book['name']}에서 문제 {n}개를 모았습니다(한글 문서로 {-(-n // 4)}쪽쯤, {cost}).")
     for line in res["spans"]:
@@ -597,16 +597,15 @@ def cmd_make(args) -> int:
         r = pipeline.make(args.workspace, args.id, args.template, args.name, args.title, args.wait, args.preview,
                           args.again)
     except pipeline.NoReader:
-        # 엔진이 모델을 직접 부를 수 없는 환경: 문제를 잘라 두고, 가벼운 서브에이전트에게 맡길 방법을 알려 준다
-        print("이 환경에서는 엔진이 모델을 직접 부를 수 없어, 옮겨 적기를 서브에이전트에게 맡깁니다(한글 파일은 아직 만들지 않았습니다).")
+        # 그림을 읽어야 하는 문제가 있다: 문제를 잘라 두고, 가벼운 서브에이전트에게 맡길 방법을 알려 준다
+        print("옮겨 적기를 서브에이전트에게 맡깁니다(한글 파일은 아직 만들지 않았습니다).")
         _hand_over(pipeline.prepare(args.workspace, args.id), args.id, args)
         return 0
     except HwpError as e:
         print(f"한글 파일을 만들지 못했습니다: {e}")
         return 1
     print(f"한글 파일: {r['file']}")
-    print(f"문제 {len(r['problems'])}개, {r['pages']}쪽. {r['total_seconds']}초 걸렸습니다"
-          f"(미리 옮겨 적어 둔 문제 {r['already']}개, 지금 옮겨 적은 문제 {r['fresh']}개).")
+    print(f"문제 {len(r['problems'])}개, {r['pages']}쪽. {r['total_seconds']}초 걸렸습니다.")
     if r.get("lifted"):
         print(f"  한글 문서에서 고른 문제 {r['lifted']}개는 문서에 든 글·수식·그림을 그대로 꺼냈습니다(다시 읽지 않음).")
     by_n = {p["n"]: p for p in r["problems"]}
@@ -748,15 +747,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--title", help="양식의 회차 이름 칸에 넣을 글")
     p.set_defaults(fn=cmd_build)
 
-    p = sub.add_parser("make", help="고른 문제를 한글 파일로 한 번에 만든다(모델을 직접 불러 옮겨 적는다)")
+    p = sub.add_parser("make", help="고른 문제를 한글 파일로 만든다(그림을 읽어야 하는 문제는 서브에이전트에게 맡길 인자를 낸다)")
     p.add_argument("id")
     p.add_argument("--template", help="양식 파일(기본: 작업 폴더의 양식.hwp)")
     p.add_argument("--name", help="만들 파일 이름(확장자 제외)")
     p.add_argument("--title", help="양식의 회차 이름 칸에 넣을 글")
-    p.add_argument("--wait", type=float, default=None,
-                   help="아직 옮겨 적지 않은 문제를 기다려 줄 최대 시간(초, 기본: 40초 + 문제당 1.5초). 넘기면 그 문제는 그림으로 넣는다")
+    p.add_argument("--wait", type=float, default=None, help="쓰지 않는다(예전 판의 인자를 받아만 둔다)")
     p.add_argument("--preview", action="store_true", help="미리보기 그림도 만든다(2초 더 걸린다)")
-    p.add_argument("--again", action="store_true", help="검사를 통과하지 못해 그림으로 들어간 문제도 다시 옮겨 적게 한다")
+    p.add_argument("--again", action="store_true", help="검사를 통과하지 못한 채 저장된 문제도 다시 옮겨 적게 한다")
     p.set_defaults(fn=cmd_make)
 
     p = sub.add_parser("doctor", help="설치 상태 점검")

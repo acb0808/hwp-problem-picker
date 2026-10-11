@@ -22,15 +22,13 @@ import pymupdf
 
 from . import aim, asks
 from . import outline as outlines
-from . import reader as readers
 from . import render, store, tasks
 from .hwp import source
 from .index import PDF_LOCK, PdfIndex, cache_root, cached_pages
 
 DEFAULT_PORT = tasks.DEFAULT_PORT
 IDLE_EXIT_HOURS = 8
-READER_IDLE_SEC = 300    # 옮겨 적을 문제가 이만큼 없으면 모델 서버를 꺼 둔다(다시 필요하면 3초 만에 뜬다)
-READ_WORKERS = 12        # 한꺼번에 옮겨 적는 문제 수(여러 문제를 연달아 담아도 밀리지 않게)
+READ_WORKERS = 4         # 한꺼번에 꺼내는 한글 문서의 문제 수
 WEB_DIR = Path(__file__).parent / "web"
 MAX_WAITING = 6          # 화면이 기다리는 쪽은 이만큼만 기억한다(빨리 넘기며 지나친 쪽은 버린다)
 WARM_AHEAD = 8           # 보고 있는 쪽 다음 몇 쪽을 미리 읽어 둘지
@@ -57,11 +55,9 @@ class App:
         self.warm: list[tuple[str, int]] = []       # 미리 읽어 둘 쪽
         self.focus: str | None = None           # 지금 보고 있는 교재
         self.last_request = time.time()
-        self.read_lock = threading.Lock()       # 아래 네 가지를 지킨다
-        self.reading: set[str] = set()          # 지금 옮겨 적고 있는 문제(store의 열쇠)
-        self.read_failed: dict[str, str] = {}   # 옮겨 적지 못한 문제와 그 까닭
-        self.reader: readers.Reader | None = None
-        self.reader_used = time.time()
+        self.read_lock = threading.Lock()       # 아래 두 가지를 지킨다
+        self.reading: set[str] = set()          # 지금 꺼내고 있는 문제(store의 열쇠)
+        self.read_failed: dict[str, str] = {}   # 꺼내지 못한 문제와 그 까닭
         self.read_pool = ThreadPoolExecutor(max_workers=READ_WORKERS, thread_name_prefix="read")
         self.outline_locks: dict[str, threading.Lock] = {}
         cfg = self._config()
@@ -241,13 +237,13 @@ class App:
         ok, buf = cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 85])
         return buf.tobytes()
 
-    # ---- 미리 옮겨 적기: 문제를 담는 순간 뒤에서 글로 옮겨 둔다. 한글 파일을 만들 때 기다리지 않게 하려는 것이다
+    # ---- 미리 꺼내 두기: 한글 문서에서 담은 문제는 담는 순간 뒤에서 문서의 글·수식·그림을 꺼내 둔다.
+    #      교재(PDF)의 문제는 여기서 옮겨 적지 않는다. 그림을 읽는 일은 에이전트의 가벼운 서브에이전트가 맡는다(make → finish)
 
     def prefetch(self, task: dict) -> None:
-        can_read = readers.available(self.workspace)
         for item in task.get("items", []):
-            if not can_read and not source.is_document(item["pdf_path"]):
-                continue                             # 한글 문서의 문제는 모델 없이도 문서에서 그대로 꺼낼 수 있다
+            if not source.is_document(item["pdf_path"]):
+                continue
             folder = store.folder(self.workspace, item)
             with self.read_lock:
                 if folder.name in self.reading or folder.name in self.read_failed or store.load(folder) is not None:
@@ -256,7 +252,8 @@ class App:
             self.read_pool.submit(self._read_one, item, folder)
 
     def read_states(self, task: dict) -> dict:
-        """담은 문제마다 글로 옮겨 둔 상태: ok(옮겨 둠), working(옮기는 중), error(옮기지 못함), none."""
+        """담은 문제마다 글을 준비해 둔 상태: ok(준비됨), working(꺼내는 중), error(꺼내지 못함), none.
+        available은 늘 거짓이다(화면이 '미리 옮겨 적는 중' 표시를 하지 않게 한다. 교재의 문제는 미리 옮겨 적지 않는다)."""
         states = {}
         for item in task.get("items", []):
             folder = store.folder(self.workspace, item)
@@ -268,25 +265,13 @@ class App:
                     states[item["pid"]] = "ok" if st["status"] == "ok" else "error"
                 else:
                     states[item["pid"]] = "error" if folder.name in self.read_failed else "none"
-        return {"available": readers.available(self.workspace), "states": states}
-
-    def _the_reader(self) -> readers.Reader:
-        with self.read_lock:
-            if self.reader is None or self.reader.proc is None or self.reader.proc.poll() is not None:
-                self.reader = readers.Reader(*readers.settings(self.workspace))
-                self.reader.start()
-            self.reader_used = time.time()
-            return self.reader
+        return {"available": False, "states": states}
 
     def _read_one(self, item: dict, folder: Path) -> None:
         try:
             idx = self.index(item["pdf_id"]) if item["pdf_id"] in self.pdfs else PdfIndex(item["pdf_path"], item["pdf_id"])
-            if not item.get("manual") and store.lift(folder, item, idx) is not None:
-                return
-            if not readers.available(self.workspace):
-                return
-            store.prepare(folder, item, idx)
-            store.read(folder, item, idx, self._the_reader(), time.time() + 120)
+            if not item.get("manual"):
+                store.lift(folder, item, idx)
         except Exception as e:
             traceback.print_exc()
             with self.read_lock:
@@ -294,28 +279,11 @@ class App:
         finally:
             with self.read_lock:
                 self.reading.discard(folder.name)
-                self.reader_used = time.time()
-
-    def warm_reader(self) -> None:
-        """모델 서버를 미리 띄우고 짧은 요청을 한 번 보내 둔다. 서버를 막 띄운 뒤의 첫 요청은 느리기 때문이다."""
-        if not readers.available(self.workspace):
-            return
-        try:
-            self._the_reader().ask("Reply with the single word: ok", deadline=time.time() + 60)
-        except Exception:
-            traceback.print_exc()
-
-    def stop_reader(self, only_if_idle: bool = False) -> None:
-        with self.read_lock:
-            if self.reader is None or (only_if_idle and (self.reading or time.time() - self.reader_used < READER_IDLE_SEC)):
-                return
-            reader, self.reader = self.reader, None
-        reader.stop()
 
     # ---- 말로 범위를 정해 문제 모으기: 교재의 뼈대(단원·구획의 쪽 범위)와, 그 범위의 박스로 목록 만들기
 
     def _paper(self, pid: str, strict: bool = True) -> asks.PaperReader:
-        """모델을 직접 부르지 않을 때의 읽기 담당: 물음을 서브에이전트에게 맡기고 그 답을 쓴다."""
+        """쪽 그림을 읽는 물음의 담당: 물음을 서브에이전트에게 맡기고 그 답을 쓴다(엔진은 모델을 직접 부르지 않는다)."""
         return asks.PaperReader(tasks.data_dir(self.workspace) / "outline" / pid, strict)
 
     def outline(self, pid: str, refresh: bool = False, wait: float = 0.0) -> dict:
@@ -349,9 +317,7 @@ class App:
                 outlines._file(idx).unlink(missing_ok=True)
                 self._paper(pid).forget()
             data = outlines.load(idx)
-            if data is None and readers.available(self.workspace):
-                data = outlines.build(idx, self._the_reader(), time.time() + 400)
-            elif data is None and not asks.enabled(self.workspace):
+            if data is None and not asks.enabled(self.workspace):
                 raise ValueError("이 교재의 뼈대(단원과 구획이 몇 쪽인지)가 아직 없어, 단원 이름으로는 범위를 정할 수 없습니다. "
                                  "쪽 범위나 문제 번호를 알면 pick --pages 12-19 (또는 --first 0040 --last 0096)로 바로 모을 수 있고, "
                                  "선택 화면(open)에서 직접 고를 수도 있습니다")
@@ -359,12 +325,16 @@ class App:
                 # 시험 중인 길(설정 "outline": "subagent"): 쪽 그림을 읽는 물음을 서브에이전트에게 맡기고, 답이 오면 이어서 한다
                 paper = self._paper(pid)
                 left = paper.wait(wait)
-                if left and paper.waited() <= 2:
+                asked = sum(1 for j in paper.state["jobs"] if j["round"] == paper.state["round"])
+                # 답이 하나도 안 왔으면 한두 번 더 기다리게 한다. 일부만 안 온 것은 그것만 다시 맡긴다(아래에서 다시 묻게 된다)
+                if left and len(left) == asked and paper.waited() <= 2:
                     return {"name": self.pdfs[pid]["name"], "pages": idx.page_count, "pending": "waiting",
                             "jobs": [j["file"] for j in left], "round": paper.state["round"]}
                 try:
-                    asks.warm(idx, paper)
-                    data = outlines.build(idx, paper)
+                    data = asks.light(idx, paper)
+                except asks.NoOutline as e:
+                    raise ValueError(f"이 교재의 뼈대를 만들지 못했습니다: {e}. 쪽 범위나 문제 번호를 알면 pick --pages 12-19 "
+                                     "(또는 --first 0040 --last 0096)로 바로 모을 수 있고, 선택 화면(open)에서 직접 고를 수도 있습니다")
                 except asks.Pending:
                     questions = len(paper.asked)
                     return {"name": self.pdfs[pid]["name"], "pages": idx.page_count, "pending": "ask",
@@ -405,12 +375,8 @@ class App:
                     time.sleep(0.2)
             return self.boxes(pid, page)["boxes"]
 
-        if not sections:
-            reader = None
-        elif readers.available(self.workspace):
-            reader = self._the_reader()
-        else:
-            reader = self._paper(pid, strict=False)      # 구획의 첫 문제 번호는 뼈대를 만들 때 받아 둔 답에서 꺼낸다
+        # 구획의 첫 문제 번호는 뼈대를 만들 때 받아 둔 답에서 꺼낸다(새로 묻지 않는다)
+        reader = self._paper(pid, strict=False) if sections else None
         pages = tuple(body["pages"]) if body.get("pages") else None
         got = outlines.collect(idx, data, reader, get_boxes, sections, pages, body.get("first"), body.get("last"))
         if numbers:
@@ -864,15 +830,10 @@ def serve(workspace: str | Path, libraries: list[str] | None = None, port: int =
     def idle_watch() -> None:
         while True:
             time.sleep(30)
-            app.stop_reader(only_if_idle=True)
             if time.time() - app.last_request > IDLE_EXIT_HOURS * 3600:
                 httpd.shutdown()
                 return
 
     threading.Thread(target=idle_watch, daemon=True).start()
-    threading.Thread(target=app.warm_reader, daemon=True).start()
     print(f"hwp-problem-picker 선택 화면: http://127.0.0.1:{port}/  (작업 폴더: {app.workspace})", flush=True)
-    try:
-        httpd.serve_forever()
-    finally:
-        app.stop_reader()
+    httpd.serve_forever()

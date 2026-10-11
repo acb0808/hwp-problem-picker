@@ -1,8 +1,9 @@
 """문제 하나하나의 준비물을 모아 두는 곳(hwpick_data/store/<열쇠>/).
 
-선택 화면에서 문제를 담는 순간 여기에 문제 그림을 잘라 넣고 모델에게 옮겨 적게 한다. 그러면 사용자가
+한글 문서에서 고른 문제는 담는 순간 문서의 글·수식·그림을 꺼내 여기에 둔다. 그러면 사용자가
 "한글 파일로 만들어 줘"라고 할 때는 글이 이미 준비되어 있어 문서만 만들면 된다. 태스크나 순서가 아니라
-문제 자체(교재·쪽·영역)로 찾으므로, 순서를 바꾸거나 다른 목록에 다시 담아도 다시 옮겨 적지 않는다.
+문제 자체(교재·쪽·영역)로 찾으므로, 순서를 바꾸거나 다른 목록에 다시 담아도 다시 꺼내지 않는다.
+(교재의 문제를 그림에서 옮겨 적는 일은 에이전트의 서브에이전트가 맡고, 그 결과는 runs 폴더에 모인다.)
 
     clean.png        문제 그림(공통 발문이 있으면 위에 붙인다)
     meta.json        그림 속 위치를 쪽 위치로 바꾸는 데 쓸 값
@@ -35,52 +36,6 @@ FIGURE_RE = re.compile(r"!\[[^\]]*\]\(\s*figure\s*:\s*(-?[\d.]+)\s*,\s*(-?[\d.]+
 MATH_RE = re.compile(r"\$\$.+?\$\$|\$.+?\$", re.S)
 # 글 속에 맨몸으로 적힌 수. 괄호 번호 '(1)', 배점 '[4점]', 영문·숫자에 붙은 것은 건드리지 않는다
 BARE_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9.,(\[])\d+(?:\.\d+)?(?![A-Za-z0-9)\]]|[.,]\d)")
-
-PROMPT = """첨부한 그림은 수학 교재의 문제 하나입니다. 보이는 내용을 아래 규칙대로 글로 옮겨 적으세요.
-문제를 풀거나 고치지 말고 보이는 대로만 옮깁니다. 옮겨 적은 내용만 답으로 내고, 설명·인사말·코드 블록 표시(```)는 붙이지 않습니다.
-
-1. **버릴 것**: 문제 번호, 맨 위 줄 앞의 번호 범위(`[0020~0021]`), 난이도 표시(★, 상·중·하, 표정 그림), `대표문제`·`서술형`·`고난도`·`예제`·`유제` 같은 꼬리표, 출처(○○고, 2021학년도 수능 등), 쪽 안내, QR코드.
-2. **남길 것**: 문제 글, 수식, 선택지, 보기·조건 상자, 배점(`[4점]`).
-3. **수식**은 LaTeX로 적고 `$` 로 감쌉니다. 예: `$x^2 + 2x - 1$`, `$\\frac{1}{2}$`, `$\\sin A$`. 글자 하나짜리 문자(`$x$`, `$A$`)와 숫자(`$3$`)도 수식으로 적습니다.
-   도형의 점·변·도형 이름처럼 **기울지 않고 곧게 선 알파벳**은 `\\mathrm{}` 으로 감쌉니다. 예: `$\\mathrm{ABC}$`, `$\\overline{\\mathrm{AB}}$`, `$\\angle \\mathrm{B}$`. 기울어진 글자는 `$A$` 그대로 둡니다.
-4. 한 줄을 통째로 차지하는 가운데 수식은 그 줄에 `$$ ... $$` 만 적습니다.
-5. **선택지**는 `① ... ② ... ③ ... ④ ... ⑤ ...` 로 한 줄에 적습니다.
-6. **테두리 상자**(보기, 조건)는 `::: box 보기` 줄로 시작하고 `:::` 줄로 끝냅니다. 이름이 없는 상자는 `::: box` 로 시작합니다.
-7. **그림**: 도형·그래프·표·삽화처럼 글로 옮길 수 없는 것을 문서에 그림으로 넣을지는 직접 판단하세요. 문제를 이해하거나 푸는 데 쓰이면 넣고, 꾸밈일 뿐이면 넣지 않습니다. 넣을 때는 그림이 놓인 자리에 `![](figure: 왼쪽,위,오른쪽,아래)` 만 한 줄로 적습니다. 네 숫자는 첨부한 그림 전체의 가로와 세로를 각각 0~1000으로 봤을 때 그 그림이 차지하는 범위입니다.
-   - 그림에 딸린 글자(꼭짓점 이름, 길이, 눈금, 표 안의 숫자, 말풍선 속 말)는 범위에 함께 넣고, 따로 옮겨 적지 않습니다.
-   - 서로 이어진 한 장면(여러 사람과 말풍선 등)은 범위 하나로 묶습니다.
-   - 글과 수식만 든 보기·조건 상자와 답을 쓰는 빈칸은 그림이 아닙니다. 글로 옮깁니다.
-8. 줄 하나가 문단 하나입니다. 교재에서 자리가 모자라 다음 줄로 넘어갔을 뿐인 문장은 줄을 바꾸지 말고 이어서 한 줄로 적습니다. `(1)`, `(2)` 같은 작은 문제는 줄을 바꿔 적습니다. 답을 써넣는 빈칸은 `□` 로 적습니다. 빈칸 안에 `(가)`, `(나)`, `㉠` 같은 표시가 들어 있으면 그 표시를 넣어 `$\\boxed{(가)}$` 로 적습니다(수식 안이면 `\\frac{n!}{\\boxed{(가)}}` 처럼). 표시를 빼먹거나 빈칸 옆에 따로 적지 않습니다.
-9. 손으로 쓴 낙서(풀이 흔적, 동그라미, 밑줄)는 옮기지 않습니다. 낙서가 있었다면 맨 끝 줄에 `<!-- 낙서 있음 -->` 라고 적습니다.
-10. **수의 자릿수에 주의**: 수 바로 뒤에 한글이 붙어 있을 때(`24이고`, `1이 아닌`, `3의 배수`) 한글 '이'·'의'의 동그라미(ㅇ)를 숫자 0으로 읽으면 안 됩니다. `24이고`를 `240이고`로, `1이`를 `10이`로 적지 않도록 수의 자릿수를 그림에서 다시 세어 확인합니다.
-
-예시 1. 그림 오른쪽에 삼각형이 있는 문제:
-
-    그림과 같이 $\\overline{\\mathrm{AB}} = 6$, $\\angle \\mathrm{B} = 90^\\circ$인 직각삼각형 $\\mathrm{ABC}$가 있다. $\\overline{\\mathrm{BC}} = 4$일 때, 삼각형 $\\mathrm{ABC}$의 넓이는? [4점]
-    ![](figure: 640,60,985,720)
-    ① $6$  ② $8$  ③ $10$  ④ $12$  ⑤ $14$
-
-예시 2. 보기 상자가 있는 문제:
-
-    보기에서 옳은 것만을 있는 대로 고른 것은?
-    ::: box 보기
-    ㄱ. $a > 0$
-    ㄴ. $b^2 - 4ac < 0$
-    :::
-    ① ㄱ  ② ㄴ  ③ ㄱ, ㄴ
-"""
-
-RETRY = """
-
----
-앞서 아래와 같이 옮겨 적었는데 검사에서 오류가 났습니다. 그림을 다시 보고, 오류를 고친 전체 내용을 처음부터 다시 적으세요.
-
-[앞서 적은 것]
-{answer}
-
-[오류]
-{errors}
-"""
 
 
 def key(item: dict) -> str:
@@ -380,31 +335,3 @@ def resolve(folder: Path, item: dict, idx, answer: str) -> dict:
     parsed = transcript.parse(text, figures={f["name"] for f in figs})
     # warnings는 여기서만 알 수 있는 것(그림 자리, 수 확인)이다. 글 자체의 주의는 검사(check)가 다시 찾는다
     return {"text": text, "figures": figs, "errors": parsed.errors, "warnings": warnings, "fixes": fixes}
-
-
-def read(folder: Path, item: dict, idx, reader, deadline: float | None = None) -> dict:
-    """모델에게 문제 그림을 보내 옮겨 적게 하고 결과를 저장한다. 검사에 걸리면 오류를 알려 한 번 더 시킨다."""
-    started = time.time()
-    image = (folder / "clean.png").read_bytes()
-    answer = reader.ask(PROMPT, image, deadline)
-    tries = 1
-    if not answer.strip():
-        # 버릴 것(번호, 꼬리표)을 빼니 남는 것이 없다는 뜻이다. 다시 시키면 버릴 것을 억지로 적어 온다
-        res = {"text": "", "figures": [], "warnings": [], "fixes": [],
-               "errors": ["옮길 내용이 없습니다(문제 번호나 꼬리표만 있는 영역으로 보입니다)"]}
-    else:
-        res = resolve(folder, item, idx, answer)
-    if res["errors"] and answer.strip():
-        tries = 2
-        again = reader.ask(PROMPT + RETRY.format(answer=answer, errors="\n".join("- " + e for e in res["errors"])),
-                           image, deadline)
-        second = resolve(folder, item, idx, again)
-        if len(second["errors"]) <= len(res["errors"]):
-            res, answer = second, again
-    state = {"version": VERSION, "local": LOCAL, "blank": BLANK, "status": "error" if res["errors"] else "ok", **res, "answer": answer,
-             "tries": tries, "seconds": round(time.time() - started, 1), "model": f"{reader.provider}/{reader.model}",
-             "at": time.strftime("%Y-%m-%d %H:%M:%S")}
-    if not res["errors"]:
-        state.update(as_reading(item, idx, state))
-    _write(folder / "state.json", json.dumps(state, ensure_ascii=False, indent=1))
-    return state
