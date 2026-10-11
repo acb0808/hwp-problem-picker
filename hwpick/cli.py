@@ -107,8 +107,8 @@ def _screen_note(workspace) -> None:
     up = _running(ws)
     if up is None or not up[1].get("screen"):
         return
-    print("선택 화면이 아직 열려 있습니다. 결과를 알린 뒤 맨 끝에 사용자에게 「선택 화면을 닫을까요?」라고 한 줄로 묻고 턴을 끝내세요. "
-          "닫겠다고 하면 아래 명령을 실행하고, 더 고를 것이 있다고 하면 그대로 둡니다:")
+    print("선택 화면이 아직 열려 있습니다. 보고는 평소와 똑같이 다 쓰고(분량, 확인 필요, 그림을 잘라 붙인 문제 …), 그 맨 끝에 한 줄로 "
+          "「선택 화면을 닫을까요?」라고 물은 뒤 턴을 끝내세요. 닫겠다고 하면 아래 명령을 실행하고, 더 고를 것이 있다고 하면 그대로 둡니다:")
     print(f'  "{sys.executable}" -m hwpick --workspace "{ws}" close')
 
 
