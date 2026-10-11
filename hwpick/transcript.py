@@ -23,6 +23,7 @@ from latex_to_hwpeqn import convert
 CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩"
 RAW_EQUATION = "\\hwpeq"          # `$\hwpeq …$`: LaTeX가 아니라 한글 수식 문법 그대로인 수식(한글 문서에서 꺼낸 것)
 COLS_RE = re.compile(r"<!--\s*cols\s*:\s*(\d+)(?:\s+w\s*:\s*(\d+))?\s*-->")
+ROWS_RE = re.compile(r"<!--\s*figures\s*:\s*(\d+(?:\s*,\s*\d+)*)\s*-->")    # 바로 다음 그림들이 줄마다 몇 개씩 나란한가
 FIGURE_RE = re.compile(r"!\[[^\]]*\]\(figure:([A-Za-z0-9_-]+)\)")
 INLINE_RE = re.compile(r"\$\$(.+?)\$\$|\$(.+?)\$", re.S)
 # 빈칸 표시: □, \square, \Box, 속이 빈 \boxed{}
@@ -104,6 +105,12 @@ class Para:
 @dataclass
 class Figure:
     name: str
+
+
+@dataclass
+class Figures:
+    """나란히(또는 격자로) 놓인 그림들. rows는 줄마다 왼쪽부터의 그림 이름이다. 테두리 없는 표에 한 칸씩 넣는다."""
+    rows: list[list[str]]
 
 
 @dataclass
@@ -298,6 +305,28 @@ def parse(markdown: str, figures: set[str] | None = None) -> Problem:
             hint = COLS_RE.fullmatch(line)
             if hint:
                 cols, cols_width = int(hint.group(1)), int(hint.group(2) or 0)
+            side = ROWS_RE.fullmatch(line)
+            if side:
+                # 한글 문서에서 꺼낸 글에만 있다: 표에 나란히 놓여 있던 그림들. 적힌 수만큼 그림 줄이 이어질 때만 따른다
+                counts = [int(v) for v in side.group(1).split(",")]
+                names, j = [], i
+                while j < len(lines) and len(names) < sum(counts):
+                    one = lines[j].strip()
+                    j += 1
+                    if not one:
+                        continue
+                    found = FIGURE_RE.fullmatch(one)
+                    if not found:
+                        break
+                    names.append(found.group(1))
+                if len(names) == sum(counts) > 1 and all(counts):
+                    rows, at = [], 0
+                    for c in counts:
+                        rows.append(names[at:at + c])
+                        at += c
+                    used += names
+                    stack[-1].append(Figures(rows))
+                    i = j
             continue                          # 빈 줄과 메모(<!-- 낙서 있음 -->)는 내용이 아니다
         if line.startswith(":::"):
             head = line[3:].strip()
@@ -370,4 +399,6 @@ def plain_text(blocks: list) -> str:
             out.append(plain_text(b.blocks))
         elif isinstance(b, Figure):
             out.append(f"(그림 {b.name})")
+        elif isinstance(b, Figures):
+            out += ["  ".join(f"(그림 {n})" for n in row) for row in b.rows]
     return "\n".join(out)

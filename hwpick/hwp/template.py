@@ -27,7 +27,7 @@ from lxml import etree as E
 
 import re
 
-from ..transcript import CIRCLED, RAW_EQUATION, Boxed, Choices, Figure, Para, Run
+from ..transcript import CIRCLED, RAW_EQUATION, Boxed, Choices, Figure, Figures, Para, Run
 
 HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 SLOTS_PER_PAGE = 4
@@ -261,6 +261,17 @@ def scaffold(source: Path, destination: Path, problems: list[list], title: str, 
                         mark(cell, Para(runs=[Run(text=CIRCLED[k] + " ")] + b.options[k]), problem, width // cols - pad)
                     else:
                         cell.append(body())
+                hold(sub, t)
+            elif isinstance(b, Figures):
+                # 나란히 놓여 있던 그림들: 테두리 없는 표에 한 칸씩 넣어 교재의 줄·칸 배치를 지킨다(그림은 낱개로 남는다)
+                cols = max(len(r) for r in b.rows)
+                t, cells = inner_table(width, len(b.rows), cols, NO_BORDER, "CENTER")
+                for r, names in enumerate(b.rows):
+                    for c in range(cols):
+                        if c < len(names):
+                            mark(cells[r * cols + c], Figure(names[c]), problem, width // cols - pad)
+                        else:
+                            cells[r * cols + c].append(body())
                 hold(sub, t)
             else:
                 mark(sub, b, problem, width)

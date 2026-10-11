@@ -190,6 +190,9 @@ class Session:
                 pic = pictures.get((op.problem, b.name))
                 if pic is None:
                     raise HwpError(f"{op.problem + 1}번 문제의 그림 {b.name} 파일이 없습니다")
+                room = op.width * 25.4 / 7200         # HWPUNIT → mm
+                if pic.width_mm > room > 0:           # 자리보다 넓은 그림은 자리에 맞춰 줄인다(표의 한 칸, 상자 안)
+                    pic = Picture(pic.path, round(room, 1), round(pic.height_mm * room / pic.width_mm, 1))
                 self._center()
                 self._picture(pic)
             elif isinstance(b, Para):

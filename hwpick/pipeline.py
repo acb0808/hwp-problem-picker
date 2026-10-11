@@ -815,7 +815,7 @@ def build(workspace: str | Path, task_id: str, template: str | Path | None = Non
     tpl = find_template(ws, template)
     problems, pictures, as_image, with_figures = [], {}, [], []
     books: dict = {}
-    joined: list[int] = []                       # 교재에서 나란히 놓인 그림들을 한 장으로 묶어 넣은 문제
+    joined: list[int] = []                       # 나란히 놓인 그림들을 표에 줄·칸 맞춰 넣은 문제
     for i, p in enumerate(state["problems"]):
         folder = run / p["folder"]
         md = folder / "text.md"
@@ -833,7 +833,7 @@ def build(workspace: str | Path, task_id: str, template: str | Path | None = Non
             continue
         for f in p["figures"]:
             pictures[(i, f["name"])] = writer.Picture(folder / f["file"], f["width_mm"], f["height_mm"])
-        blocks, together = _merge_figures(_from_reading(folder, parsed.blocks), p, i, folder, pictures, books)
+        blocks, together = _figure_tables(_from_reading(folder, parsed.blocks), p, i, pictures)
         if together:
             joined.append(p["n"])
         problems.append(blocks)
@@ -948,56 +948,35 @@ def _side_by_side(blocks: list, rects: dict[str, list[float]], make) -> list:
     return out
 
 
-def _between(idx, page: int, rects: list[list[float]]) -> int:
-    """그림들을 한꺼번에 감싸는 네모 안에서, 그림들 밖에 있는 글자 크기의 잉크 덩어리 수(그림 사이에 낀 글이 있는지 본다)."""
-    lay, s = idx.layout(page), idx.scale(page)
-    x0, y0 = min(r[0] for r in rects) * s, min(r[1] for r in rects) * s
-    x1, y1 = max(r[2] for r in rects) * s, max(r[3] for r in rects) * s
-    pad = 0.3 * lay.em
-    count = 0
-    for b in lay.blobs:
-        cx, cy = (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2
-        if not (x0 <= cx <= x1 and y0 <= cy <= y1) or not 0.4 * lay.em <= b.h <= 1.6 * lay.em:
-            continue
-        if not any(r[0] * s - pad <= cx <= r[2] * s + pad and r[1] * s - pad <= cy <= r[3] * s + pad for r in rects):
-            count += 1
-    return count
-
-
-def _merge_figures(blocks: list, p: dict, i: int, folder: Path, pictures: dict, books: dict) -> tuple[list, bool]:
-    """교재에서 나란히(또는 격자로) 놓여 있던 그림들을 한 장으로 다시 오려 넣는다. (바꾼 블록들, 묶은 것이 있는가)
+def _figure_tables(blocks: list, p: dict, i: int, pictures: dict) -> tuple[list, bool]:
+    """교재에서 나란히(또는 격자로) 놓여 있던 그림들을 한 묶음(transcript.Figures)으로 바꾼다. (바꾼 블록들, 묶은 것이 있는가)
 
     그림은 문단 하나에 하나씩 들어가 세로로 쌓인다. 그래서 좌우로 나란한 그림이나 그림으로 된 선택지(①②③ / ④⑤)는
-    따로 넣으면 교재의 배치가 사라진다. 그런 그림들을 한꺼번에 감싸는 범위를 교재에서 한 장으로 오리면 놓인 모습과
-    그림에 붙은 번호가 그대로 남는다(낱개로 표에 나눠 넣는 방식도 해 봤다. 모양은 비슷하지만 그렇게 만든 문서에서 문제를
-    다시 고를 때 "표가 있는 문제"가 되어 그대로 꺼내지 못했다). 그림 사이에 글이 끼어 있으면 묶지 않는다.
+    따로 넣으면 교재의 배치가 사라진다. 묶음은 테두리 없는 표에 그림을 한 칸씩 넣으므로 놓인 모습이 남고, 그림은 낱개로
+    남아서 잘못 잘린 그림 하나만 한글에서 고칠 수 있다(한 장으로 다시 오려 넣는 방식도 해 봤다. 그림 하나가 잘못 잘리면
+    합쳐진 그림을 다시 나눠야 해서 버렸다). 한 칸에 들어가도록 묶음의 그림들을 모두 같은 비율로 줄인다.
     """
-    from . import render
     from .hwp import writer
     rects = {f["name"]: f["rect"] for f in p["figures"] if f.get("rect")}
-    if len(rects) < 2 or not p.get("pdf_path") or not p.get("page"):
-        return blocks, False
-    done = []
+    if len(rects) >= 2:
+        blocks = _side_by_side(blocks, rects, transcript.Figures)
+    found = []
 
-    def merged(group: list[list[str]]):
-        names = [n for row in group for n in row]
-        members = [rects[n] for n in names]
-        union = [min(r[0] for r in members), min(r[1] for r in members), max(r[2] for r in members), max(r[3] for r in members)]
-        try:
-            idx = _index(p, books)
-            if _between(idx, p["page"] - 1, members) > 6:
-                return None
-            path = folder / f"fig-{'+'.join(names)}.png"
-            render.imwrite(path, _scan_clip(idx, p["page"] - 1, union))
-        except (OSError, ValueError, KeyError, RuntimeError):
-            return None                               # 교재를 열 수 없으면 따로따로 넣는다
-        w_mm, h_mm = (union[2] - union[0]) * MM_PER_PT, (union[3] - union[1]) * MM_PER_PT
-        shrink = min(1.0, MAX_FIGURE_MM[0] / w_mm, MAX_FIGURE_MM[1] / h_mm)
-        pictures[(i, "+".join(names))] = writer.Picture(path, round(w_mm * shrink, 1), round(h_mm * shrink, 1))
-        done.append(names)
-        return transcript.Figure("+".join(names))
+    def fit(items: list, room: float) -> None:
+        for b in items:
+            if isinstance(b, transcript.Boxed):
+                fit(b.blocks, room - 4.0)                                    # 상자의 테두리와 안쪽 여백만큼 좁다
+            elif isinstance(b, transcript.Figures):
+                names = [n for row in b.rows for n in row if (i, n) in pictures]
+                each = room / max(len(row) for row in b.rows) - 4.0          # 칸의 안쪽 여백을 뺀 한 칸의 폭
+                factor = min(1.0, each / max(pictures[(i, n)].width_mm for n in names)) if names else 1.0
+                for n in names if factor < 1.0 else []:
+                    pic = pictures[(i, n)]
+                    pictures[(i, n)] = writer.Picture(pic.path, round(pic.width_mm * factor, 1), round(pic.height_mm * factor, 1))
+                found.append(b)
 
-    return _side_by_side(blocks, rects, merged), bool(done)
+    fit(blocks, MAX_FIGURE_MM[0])
+    return blocks, bool(found)
 
 
 def _figure_names(blocks: list) -> set[str]:
@@ -1005,6 +984,8 @@ def _figure_names(blocks: list) -> set[str]:
     for b in blocks:
         if isinstance(b, transcript.Figure):
             out.add(b.name)
+        elif isinstance(b, transcript.Figures):
+            out |= {n for row in b.rows for n in row}
         elif isinstance(b, transcript.Boxed):
             out |= _figure_names(b.blocks)
     return out

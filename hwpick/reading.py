@@ -21,7 +21,7 @@ import re
 from pathlib import Path
 
 from . import transcript
-from .transcript import CIRCLED, Boxed, Choices, Figure, Para, Run
+from .transcript import CIRCLED, Boxed, Choices, Figure, Figures, Para, Run
 
 SCHEMA = "restoration-reading/1"
 BOXED_TEXT_RE = re.compile(r"\\boxed\s*\{\s*([^\[\]\\${}\r\n]{1,20}?)\s*\}")
@@ -54,6 +54,9 @@ def content_of(blocks: list) -> tuple[list[dict], dict]:
                     out.append({"kind": "paragraph", "runs": _runs_out(b.runs), **({"align": "CENTER"} if b.center else {})})
             elif isinstance(b, Figure):
                 out.append({"kind": "paragraph", "runs": [], "figure_ref": b.name})
+            elif isinstance(b, Figures):
+                # 나란히 놓인 모습은 저장 형식에 자리가 없다. 그림만 차례대로 적는다(되살릴 때는 글에서 만든 블록을 쓴다)
+                out += [{"kind": "paragraph", "runs": [], "figure_ref": n} for row in b.rows for n in row]
             elif isinstance(b, Choices):
                 cells = [[{"kind": "text", "text": CIRCLED[k % len(CIRCLED)] + " "}] + _runs_out(o) for k, o in enumerate(b.options)]
                 if in_box:
@@ -146,6 +149,8 @@ def flat(blocks: list) -> list:
             out.append(("B", b.label, flat(b.blocks)))
         elif isinstance(b, Figure):
             out.append(("F", b.name))
+        elif isinstance(b, Figures):
+            out.append(("G", b.rows))
     return out
 
 

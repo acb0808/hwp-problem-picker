@@ -24,7 +24,7 @@ from ..transcript import CIRCLED
 from ..transcript import RAW_EQUATION as RAW     # 전사 글에서 "이 수식은 이미 한글 수식 문법"이라는 표시
 
 SUFFIXES = (".hwp", ".hwpx")
-VERSION = 5                  # 꺼내는 방식을 바꾸면 올린다(변환해 둔 PDF·HWPX는 그대로 쓴다)
+VERSION = 6                  # 꺼내는 방식을 바꾸면 올린다(변환해 둔 PDF·HWPX는 그대로 쓴다)
 HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 HH = "http://www.hancom.co.kr/hwpml/2011/head"
 UNIT_PER_MM = 7200 / 25.4    # HWPUNIT
@@ -254,6 +254,20 @@ class _Reader:
             return
         if len(cells) == 1:
             self._boxed(cells[0])
+            return
+        shown = [[[q for q in para if q[0] != "text" or str(q[1]).strip()] for para in cell] for cell in filled]
+        if sum(1 for cell in shown if cell) >= 2 and all(
+                len(cell) == 1 and len(cell[0]) == 1 and cell[0][0][0] == "pic" for cell in shown if cell):
+            # 그림만 한 칸에 하나씩 든 표: 나란히 놓은 그림들이다. 줄마다 몇 개씩인지 남기고 그림을 차례대로 적는다
+            cols = int(tbl.get("colCnt") or 1)
+            counts = [sum(1 for cell in shown[k:k + cols] if cell) for k in range(0, len(shown), cols)]
+            before = len(self.lines)
+            self.lines.append("<!-- figures:" + ",".join(str(c) for c in counts if c) + " -->")
+            for cell in shown:
+                if cell:
+                    self._figure(cell[0][0][1])
+            if len(self.lines) - before - 1 != sum(counts):
+                del self.lines[before]               # 못 꺼낸 그림이 있으면 배치는 적지 않는다(까닭은 _figure가 적었다)
             return
         full = [cell for cell, got in zip(cells, filled) if got]
         if len(full) == 1:
