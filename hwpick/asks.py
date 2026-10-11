@@ -57,21 +57,22 @@ JOB = """아래 [그림]들을 `view_file`로 **한 턴에 함께** 열고, 그�
 
 
 def enabled(workspace) -> bool:
-    """서브에이전트에게 뼈대를 읽히는 길을 켰는가. 기본은 끈다.
+    """서브에이전트에게 교재의 뼈대를 읽히는가. 기본은 읽힌다.
 
-    가벼운 모델은 단원(차례)은 잘 읽지만 그림 글자로 된 단계 제목을 자주 놓쳐서, 지금은 구획이 틀린 뼈대가 나온다
-    (2026-10-11 한 교재에서 구획 30개 가운데 맞은 것 0). 틀린 뼈대는 한 번 저장되면 계속 쓰이므로, 맞게 나올 때까지는
-    작업 폴더 설정의 "outline": "subagent" 나 환경 변수 HWPICK_OUTLINE=subagent 로 켠 사람만 쓴다.
+    문제집 세 권에서 단원과 구획의 시작 쪽이 모두 맞았다(2026-10-11). 개념 설명과 예제가 섞인 개념서에서는 구획의
+    시작 쪽이 틀리는 곳이 있어, 뼈대의 출력에 그 사실을 적고 에이전트가 고른 쪽 범위와 문제 번호를 보고하게 한다.
+    끄려면 작업 폴더 설정에 "outline": "off" 를 적거나 환경 변수 HWPICK_OUTLINE=off 를 준다(그러면 쪽 범위를 묻는다).
     """
     import os
-    if os.environ.get("HWPICK_OUTLINE", "").strip().lower() == "subagent":
-        return True
+    env = os.environ.get("HWPICK_OUTLINE", "").strip().lower()
+    if env:
+        return env not in ("off", "0", "false", "no")
     try:
         from . import tasks
         cfg = json.loads((tasks.data_dir(workspace) / "config.json").read_text(encoding="utf-8"))
-        return cfg.get("outline") == "subagent"
+        return cfg.get("outline") != "off"
     except (OSError, ValueError):
-        return False
+        return True
 
 
 class Pending(Exception):

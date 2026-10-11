@@ -189,6 +189,9 @@ def cmd_outline(args) -> int:
         print("(차례를 읽지 못해 단원 이름은 쪽에서 읽힌 대로입니다. 단원 구분이 틀릴 수 있습니다.)")
     for line in res["lines"]:
         print(line)
+    if res.get("light"):
+        print("(가벼운 서브에이전트가 쪽 그림을 읽어 만든 뼈대입니다. 구획의 시작 쪽이 틀린 곳이 있을 수 있으니, 보고할 때 고른 구획의 "
+              "이름·쪽 범위·첫 번호~끝 번호를 밝혀 사용자가 확인할 수 있게 하세요. A·B·C 같은 표시는 그림이라 이름에서 빠져 있을 수 있습니다.)")
     print(f'모으려면: pick "{res["name"]}" --section <구획 ID> [--section …] --name "목록 이름"')
     return 0
 
@@ -200,7 +203,10 @@ def _outline_hand_over(res: dict, args) -> int:
         print(f"{res['name']}: 서브에이전트가 아직 끝나지 않았습니다(답이 덜 온 지시문 {len(res['jobs'])}개).")
         print(f"같은 명령을 다시 실행하세요(다시 기다립니다): {again}")
         return 2
-    print(f"{res['name']} ({res['pages']}쪽): 단원 구성을 알아내려면 쪽 그림을 읽어야 합니다(교재마다 처음 한 번, 이번이 {res['round']}번째 읽기).")
+    print(f"{res['name']} ({res['pages']}쪽): 단원 구성을 알아내려면 쪽 그림을 읽어야 합니다(교재마다 처음 한 번, 이번이 {res['round']}번째 읽기. "
+          "보통 두세 번에 걸쳐 10분쯤 걸립니다).")
+    if res["round"] == 1:
+        print("먼저 사용자에게 한 줄로 알리세요: 처음 보는 교재라 단원 구성을 읽는 데 10분쯤 걸립니다(다음부터는 바로 됩니다).")
     print(f"그림 {res['questions']}장을 가벼운 서브에이전트 {len(res['jobs'])}개가 나눠 읽습니다. 쪽을 직접 열어 보지 않습니다.")
     print("1) 아래 한 줄을 인자로 invoke_subagent를 **한 번** 호출하세요(안티그래비티). 고치지 말고 그대로 넣습니다.")
     short = _dispatch(res["jobs"], READ_PAGES)
@@ -673,7 +679,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("books", help="교재 목록(선택 화면에 열려 있는 교재를 표시한다)")
     p.set_defaults(fn=cmd_books)
 
-    p = sub.add_parser("outline", help="교재의 뼈대: 단원과 구획이 몇 쪽부터 몇 쪽인지(처음 한 번은 1~2분 걸린다)")
+    p = sub.add_parser("outline", help="교재의 뼈대: 단원과 구획이 몇 쪽부터 몇 쪽인지(처음 보는 교재는 서브에이전트에게 쪽 그림을 읽힌다)")
     p.add_argument("book", nargs="?", help="교재 이름의 일부나 ID(생략하면 선택 화면에 열려 있는 교재)")
     p.add_argument("--refresh", action="store_true", help="저장해 둔 뼈대를 버리고 다시 만든다")
     p.add_argument("--wait", type=float, default=240.0, help="쪽 그림을 읽는 서브에이전트를 기다려 줄 최대 시간(초)")

@@ -318,11 +318,11 @@ class App:
                 self._paper(pid).forget()
             data = outlines.load(idx)
             if data is None and not asks.enabled(self.workspace):
-                raise ValueError("이 교재의 뼈대(단원과 구획이 몇 쪽인지)가 아직 없어, 단원 이름으로는 범위를 정할 수 없습니다. "
+                raise ValueError("이 교재의 뼈대(단원과 구획이 몇 쪽인지)가 아직 없고, 설정에서 뼈대 읽기를 꺼 두어 단원 이름으로는 범위를 정할 수 없습니다. "
                                  "쪽 범위나 문제 번호를 알면 pick --pages 12-19 (또는 --first 0040 --last 0096)로 바로 모을 수 있고, "
                                  "선택 화면(open)에서 직접 고를 수도 있습니다")
             elif data is None:
-                # 시험 중인 길(설정 "outline": "subagent"): 쪽 그림을 읽는 물음을 서브에이전트에게 맡기고, 답이 오면 이어서 한다
+                # 쪽 그림을 읽는 물음을 서브에이전트에게 맡기고, 답이 오면 이어서 한다
                 paper = self._paper(pid)
                 left = paper.wait(wait)
                 asked = sum(1 for j in paper.state["jobs"] if j["round"] == paper.state["round"])
@@ -340,7 +340,8 @@ class App:
                     return {"name": self.pdfs[pid]["name"], "pages": idx.page_count, "pending": "ask",
                             "jobs": paper.jobs(), "questions": questions, "round": paper.state["round"]}
         return {"name": self.pdfs[pid]["name"], "pages": idx.page_count, "lines": outlines.describe(idx, data),
-                "units": bool(data.get("units")), "seconds": data["seconds"], "cost": data["cost"], "at": data["at"]}
+                "units": bool(data.get("units")), "seconds": data["seconds"], "cost": data["cost"], "at": data["at"],
+                "light": bool(data.get("light"))}
 
     def pick(self, body: dict) -> dict:
         """구획들(또는 쪽 범위)의 문제 박스를 모아 목록(태스크)을 만든다. 모델은 구획의 경계를 확인할 때만 쓴다."""
