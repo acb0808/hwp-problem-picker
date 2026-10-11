@@ -1,6 +1,9 @@
 """양식 어댑터: 양식(HWPX)에 문제마다 "여기에 무엇을 넣을지" 표식 문단을 심는다.
 
 지금 지원하는 양식은 프로젝트의 `양식.hwp`(A4, 쪽마다 2×2칸, 칸 머리에 'N번.')이다. 구조는 이렇다.
+칸은 왼쪽 단을 위에서 아래로, 그다음 오른쪽 단을 위에서 아래로 채운다. 문제 하나가 칸 하나에 다 들어가지 않으면
+(writer가 한글이 계산한 높이로 알아낸다) 아래 칸과 합친 긴 칸에 넣고, 그래도 넘치면 남은 부분을 다음 칸에
+'N번. (이어서)'라는 머리를 달아 이어 쓴다(arrange).
 
     본문[0]  머리말 표(회차 이름 자리와, 문제 수가 들어갈 '(문제)' 자리 포함)
     본문[1]  첫 쪽의 2×2 표
@@ -106,9 +109,23 @@ class Operation:
 
 
 @dataclass
+class Cell:
+    """칸 하나에 넣을 것: 어느 문제(0부터)의 몇 번째 블록부터 몇 번째 블록 앞까지인가. start가 0이 아니면 앞 칸에서 이어지는 칸이다."""
+    problem: int
+    start: int
+    end: int
+
+
+@dataclass
 class Scaffold:
     operations: list[Operation]
     pages: int
+    columns: list[list]           # 단마다 [위 칸, 아래 칸] 또는 [합친 칸 하나]. 칸은 Cell이거나 빈칸(None)
+    cells: list                   # 문서에 놓인 차례(쪽 → 줄 → 칸)대로 본 칸들(measure가 한글이 저장한 문서와 맞춰 보는 데 쓴다)
+    room: list[tuple[int, int, int]]   # [첫 쪽, 그 뒤 쪽]의 (윗줄 칸 높이, 아랫줄 칸 높이, 칸의 위아래 여백 합)
+
+
+CONTINUED = "{}번. (이어서)"   # 앞 칸에서 이어지는 칸의 머리(source.py가 이 글로 이어지는 칸을 알아본다)
 
 
 def _set_text(par, text: str) -> None:
@@ -123,8 +140,17 @@ def _set_text(par, text: str) -> None:
         par.remove(seg)
 
 
-def scaffold(source: Path, destination: Path, problems: list[list], title: str, first_page: bool = False) -> Scaffold:
+def plain(problems: list[list]) -> list[list]:
+    """문제 하나에 칸 하나씩인 보통의 배치."""
+    cells: list = [Cell(i, 0, len(blocks)) for i, blocks in enumerate(problems)]
+    cells += [None] * (-len(cells) % 2)
+    return [cells[k:k + 2] for k in range(0, len(cells), 2)]
+
+
+def scaffold(source: Path, destination: Path, problems: list[list], title: str, first_page: bool = False,
+             layout: list[list] | None = None) -> Scaffold:
     """양식 HWPX(source)에 문제들의 표식을 심어 destination에 쓴다. problems는 문제별 블록 목록이다.
+    layout은 단마다 넣을 칸들이다(arrange가 만든 것). 주지 않으면 문제 하나에 칸 하나씩 넣는다.
 
     first_page가 거짓이면 양식의 첫 쪽(머리말과 낮은 표)을 빼고 둘째 쪽의 표로 첫 쪽부터 채운다. 이때 회차 이름(title)은
     문서에 들어가지 않는다(머리말에 있던 자리다).
@@ -239,30 +265,62 @@ def scaffold(source: Path, destination: Path, problems: list[list], title: str, 
             else:
                 mark(sub, b, problem, width)
 
-    def fill(cell, index: int) -> None:
+    def fill(cell, spec: Cell | None) -> None:
         sub = cell.find(_tag("subList"))
         for p in list(sub):
             sub.remove(p)
-        if index >= len(problems):
+        if spec is None:
             sub.append(body())
             return
         label = deepcopy(label_model)
-        _set_text(label, f"{index + 1}번.")
+        _set_text(label, f"{spec.problem + 1}번." if spec.start == 0 else CONTINUED.format(spec.problem + 1))
         sub.append(label)
-        place(sub, problems[index], index, inner)
+        place(sub, problems[spec.problem][spec.start:spec.end], spec.problem, inner)
 
+    def height(cell) -> int:
+        return int(cell.find(_tag("cellSz")).get("height"))
+
+    def room_of(model) -> tuple[int, int, int]:
+        rows = model.find(".//" + _tag("tbl")).findall(_tag("tr"))
+        m = rows[0].find(_tag("tc")).find(_tag("cellMargin"))
+        return height(rows[0].find(_tag("tc"))), height(rows[1].find(_tag("tc"))), int(m.get("top")) + int(m.get("bottom"))
+
+    columns = [list(c) for c in (layout if layout is not None else plain(problems))] or [[None, None]]
+    if len(columns) % 2:
+        columns.append([None, None])
+    cells: list = []
     pages = 0
-    for start in range(0, max(1, len(problems)), SLOTS_PER_PAGE):
+    for start in range(0, len(columns), 2):
         page = deepcopy(first if start == 0 and first_page else later)
         page.set("pageBreak", "0" if start == 0 else "1")
         if start == 0 and setup:
             for k, node in enumerate(setup):
                 page.find(_tag("run")).insert(k, node)
         next_id += 1
-        page.find(".//" + _tag("tbl")).set("id", str(next_id))
-        for row, tr in enumerate(page.find(".//" + _tag("tbl")).findall(_tag("tr"))):
-            for col, cell in enumerate(tr.findall(_tag("tc"))):
-                fill(cell, start + col * 2 + row)        # 왼쪽 단을 위에서 아래로 채운 뒤 오른쪽 단
+        table = page.find(".//" + _tag("tbl"))
+        table.set("id", str(next_id))
+        top, bottom = table.findall(_tag("tr"))
+        grid = [top.findall(_tag("tc")), bottom.findall(_tag("tc"))]
+        lower: list = []
+        for col in (0, 1):                               # 왼쪽 단을 위에서 아래로 채운 뒤 오른쪽 단
+            specs = columns[start + col]
+            if len(specs) == 1:
+                # 아래 칸과 합친 긴 칸: 위 칸이 두 줄을 차지하고, 아래 칸은 표에서 뺀다
+                grid[0][col].find(_tag("cellSpan")).set("rowSpan", "2")
+                grid[0][col].find(_tag("cellSz")).set("height", str(height(grid[0][col]) + height(grid[1][col])))
+                bottom.remove(grid[1][col])
+                fill(grid[0][col], specs[0])
+            else:
+                fill(grid[0][col], specs[0])
+                fill(grid[1][col], specs[1])
+                lower.append(specs[1])
+        if not lower:
+            # 두 단을 모두 합쳤으면 아랫줄에 칸이 하나도 없다. 한 줄짜리 표로 만든다
+            table.remove(bottom)
+            table.set("rowCnt", "1")
+            for cell in grid[0]:
+                cell.find(_tag("cellSpan")).set("rowSpan", "1")
+        cells += [columns[start][0], columns[start + 1][0]] + lower
         root.append(page)
         pages += 1
     for node in list(root.iter(_tag("linesegarray"))):
@@ -272,7 +330,103 @@ def scaffold(source: Path, destination: Path, problems: list[list], title: str, 
     with ZipFile(destination, "w", ZIP_DEFLATED) as z:
         for name, data in files.items():
             z.writestr(name, data)
-    return Scaffold(operations, pages)
+    return Scaffold(operations, pages, columns, cells, [room_of(first if first_page else later), room_of(later)])
+
+
+def measure(hwpx: Path, plan: Scaffold) -> dict[int, tuple[int, list[tuple[int, int]]]] | None:
+    """내용을 다 넣고 한글이 저장한 HWPX에서, 문제마다 실제로 차지한 높이를 읽는다.
+
+    돌려주는 값: {문제(0부터): (번호 줄의 높이, [블록마다 (높이, 그 가운데 마지막 줄 아래의 줄 간격)])}. 단위는 HWPUNIT.
+    한글은 문단마다 줄의 자리(lineseg)를 적어 둔다. 수식·그림·선택지 표의 높이도 거기에 들어 있어서 어림할 필요가 없다.
+    문서의 짜임이 심어 둔 것과 다르면(읽을 수 없으면) None.
+    """
+    with ZipFile(hwpx) as z:
+        root = E.fromstring(z.read("Contents/section0.xml"))
+    found = []
+    for top in root:
+        table = top.find(".//" + _tag("tbl"))
+        if table is not None and int(table.get("colCnt", "0")) == 2 and table.find(_tag("tr")) is not None:
+            found += [tc for tr in table.findall(_tag("tr")) for tc in tr.findall(_tag("tc"))]
+    if len(found) != len(plan.cells):
+        return None
+    sizes: dict[int, tuple[int, dict[int, tuple[int, int]]]] = {}
+    for tc, spec in zip(found, plan.cells):
+        if spec is None:
+            continue
+        paras = tc.find(_tag("subList")).findall(_tag("p"))
+        if len(paras) != 1 + spec.end - spec.start:
+            return None
+        got = []
+        for p in paras:
+            segs = p.findall(_tag("linesegarray") + "/" + _tag("lineseg"))
+            if not segs:
+                return None
+            got.append((sum(int(s.get("vertsize")) + int(s.get("spacing")) for s in segs), int(segs[-1].get("spacing"))))
+        label, blocks = sizes.setdefault(spec.problem, (got[0][0], {}))
+        for k, size in zip(range(spec.start, spec.end), got[1:]):
+            blocks[k] = size
+    out = {}
+    for problem, (label, blocks) in sizes.items():
+        if sorted(blocks) != list(range(len(blocks))):
+            return None
+        out[problem] = (label, [blocks[k] for k in range(len(blocks))])
+    return out
+
+
+def arrange(sizes: dict[int, tuple[int, list[tuple[int, int]]]], count: int, room: list[tuple[int, int, int]],
+            slack: int = 150) -> list[list]:
+    """잰 높이로 문제들을 칸에 다시 나눈다. 차례는 바꾸지 않는다.
+
+    칸 하나에 다 들어가는 문제는 그대로 한 칸이다. 넘치는 문제는
+      - 윗칸에서 시작하면 아래 칸과 합친 긴 칸에 넣고, 그래도 남으면 다음 단의 윗칸에서 이어 쓴다(또 넘치면 또 합친다)
+      - 아랫칸에서 시작하면 들어가는 블록까지만 넣고 다음 단의 윗칸에서 이어 쓴다. 첫 블록부터 안 들어가면 그 칸은 비우고 다음 단에서 시작한다
+    블록(문단, 그림, 보기 상자, 선택지) 하나는 쪼개지 않는다. slack은 칸 높이에서 덜어 두는 여유다.
+    """
+    columns: list[list] = []
+    cur: list = []
+
+    def cap(tall: bool) -> int:
+        top, bottom, pad = room[0 if len(columns) < 2 else 1]
+        return (top + bottom if tall else (bottom if cur else top)) - pad - slack
+
+    def close() -> None:
+        nonlocal cur
+        if len(cur) == 2:
+            columns.append(cur)
+            cur = []
+
+    for i in range(count):
+        label, blocks = sizes.get(i, (0, []))
+
+        def need(a: int, b: int) -> int:
+            return label + sum(h for h, _ in blocks[a:b]) - (blocks[b - 1][1] if b > a else 0)
+
+        def reach(a: int, limit: int) -> int:
+            b = a
+            while b < len(blocks) and need(a, b + 1) <= limit:
+                b += 1
+            return b
+
+        k = 0
+        while True:
+            if need(k, len(blocks)) <= cap(False):
+                cur.append(Cell(i, k, len(blocks)))
+                close()
+                break
+            if not cur:
+                j = max(k + 1, reach(k, cap(True)))          # 윗칸: 아래 칸과 합친다
+                columns.append([Cell(i, k, j)])
+            else:
+                j = reach(k, cap(False))                      # 아랫칸: 들어가는 데까지만
+                cur.append(Cell(i, k, j) if j > k else None)
+                close()
+            k = j
+            if k >= len(blocks) and k > 0:
+                break
+    if cur:
+        cur.append(None)
+        close()
+    return columns
 
 
 def _label_run(label: str) -> Run:

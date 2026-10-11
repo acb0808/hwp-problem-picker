@@ -24,7 +24,7 @@ from ..transcript import CIRCLED
 from ..transcript import RAW_EQUATION as RAW     # 전사 글에서 "이 수식은 이미 한글 수식 문법"이라는 표시
 
 SUFFIXES = (".hwp", ".hwpx")
-VERSION = 3                  # 꺼내는 방식을 바꾸면 올린다(변환해 둔 PDF·HWPX는 그대로 쓴다)
+VERSION = 4                  # 꺼내는 방식을 바꾸면 올린다(변환해 둔 PDF·HWPX는 그대로 쓴다)
 HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 HH = "http://www.hancom.co.kr/hwpml/2011/head"
 UNIT_PER_MM = 7200 / 25.4    # HWPUNIT
@@ -96,6 +96,8 @@ STOP_RE = re.compile(r"[\W_]*(수고하셨|끝\s*[-–—\]>)]|이하\s*여백|�
 SUBJECT_RE = re.compile(r"[\W_]*(미분과\s*적분|확률과\s*통계|이산\s*수학|기하와\s*벡터|기하|미적분)[\W_]*")   # 선택 과목의 제목 줄
 # 여러 문제가 함께 쓰는 발문의 머리('[3~4] 다음 글을 읽고 …')
 RANGE_RE = re.compile(r"\s*[※*]?\s*[\[(〔［]\s*(\d{1,3})\s*[~∼～\-–]\s*(\d{1,3})\s*[\])〕］]")
+# 이 도구가 긴 문제를 다음 칸에 이어 쓸 때 다는 머리('3번. (이어서)'). 그 칸의 내용은 3번의 뒷부분이다
+CONTINUED_RE = re.compile(r"\s*(\d{1,3})\s*번\s*[.．]?\s*\(\s*이어서\s*\)\s*$")
 ANSWER_RE = re.compile(r"[\W_]*(정답\s*및\s*해설|빠른\s*정답|정답|해설)")       # 문서 끝에 붙는 정답·해설의 제목
 DRAWINGS = ("rect", "ellipse", "line", "arc", "polygon", "curve", "container", "connectLine", "textart", "ole", "video", "chart")
 NOTES = ("header", "footer", "footNote", "endNote")
@@ -367,6 +369,7 @@ class _Splitter:
         self.family, self.headings = family, headings
         self.pattern = dict(FAMILIES).get(family)
         self.found: list[dict] = []              # {"number", "word", "strip", "paras", "inline"}
+        self.continued: list[dict] = []          # 앞 칸에서 이어지는 칸들: {"number", "paras"}
         self.notes: list[str] = []
         self._cache: dict[int, tuple | None] = {}
         self.dotted = False                      # 'N번' 방식에서: 이 문서의 번호에는 뒤에 점이 붙는가
@@ -384,7 +387,7 @@ class _Splitter:
         if key not in self._cache:
             lead = _lead(par)
             res = None
-            m = self.pattern.match(lead) if self.pattern is not None else None
+            m = self.pattern.match(lead) if self.pattern is not None and not CONTINUED_RE.match(lead) else None
             if m and self.dotted and not re.search(r"[.．:]", m.group(0)) and lead[m.end():].strip():
                 m = None                         # 문서의 번호는 '3번.'인데 이 줄은 '5번 던질 때…': 번호가 아니라 문장이다
             if m:
@@ -406,6 +409,8 @@ class _Splitter:
             sub = tc.find(_tag("subList"))
             paras = sub.findall(_tag("p")) if sub is not None else []
             for k, par in enumerate(paras):
+                if CONTINUED_RE.match(_lead(par)):
+                    return True                  # 앞 칸에서 이어지는 칸만 있는 표(긴 문제가 한 쪽을 다 차지한 경우)
                 lab = self.label(par)
                 if lab and _weight(par, lab[2]) + sum(_weight(p) for p in paras[k + 1:]) >= 6:
                     return True
@@ -439,6 +444,12 @@ class _Splitter:
         last = None                              # 이 흐름에서 마지막으로 본 번호
         for k, par in enumerate(paras):
             lab = labels[k]
+            more = CONTINUED_RE.match(_lead(par))
+            if more and _weight(par) <= len(_lead(par).strip()):
+                # 앞 칸에서 이어지는 칸의 머리: 이 뒤의 문단들은 그 번호의 문제에 붙인다(칸을 도는 차례가 달라 문제가 뒤에 나올 수도 있다)
+                current = {"number": int(more.group(1)), "paras": []}
+                self.continued.append(current)
+                continue
             if lab:
                 number, word, strip = lab
                 if number is not None and word == "" and last is not None and last + 1 < number <= last + 10 \
@@ -492,6 +503,11 @@ class _Splitter:
     def tidy(self) -> None:
         """문제 뒤에 딸려 온 것(끝 표시와 그 뒤, 다음 묶음의 제목)을 떼어 낸다."""
         first_line = _first_line
+        for more in self.continued:
+            owner = next((f for f in reversed(self.found) if f["number"] == more["number"] and not f["word"]), None)
+            if owner is not None:
+                owner["paras"].extend(more["paras"])
+        self.continued = []
         # 문제마다 '정답'·'해설' 줄이 있으면 정답·해설 문서다. 그런 문서에서는 그 줄이 내용이므로 자르지 않는다
         answered = sum(1 for f in self.found if any(ANSWER_RE.match(first_line(p)) for p in f["paras"][1:]))
         cut_answers = answered < max(2, len(self.found) // 2)

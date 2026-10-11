@@ -530,8 +530,7 @@ def cmd_finish(args) -> int:
             print(f"  {r['n']}번 확인 필요: {'; '.join(notes)}")
     if result.get("with_figures"):
         print(f"교재에서 그림을 잘라 붙인 문제: {result['with_figures']} — 그림이 맞게 잘렸는지는 확인하지 않았습니다.")
-    if result["overflow"]:
-        print(f"주의: 내용이 칸을 넘쳐 쪽 수가 예상({result['expected_pages']}쪽)보다 많습니다. 어느 칸인지는 결과물에서 봐야 합니다.")
+    _layout_notes(result)
     print("미리보기 그림을 열어 확인하지 말고, 위에 적힌 번호들을 사용자가 결과물에서 직접 보고 고치도록 그대로 알리세요.")
     return 0
 
@@ -573,6 +572,19 @@ def cmd_check(args) -> int:
     return 0
 
 
+def _layout_notes(result: dict, lead: str = "") -> None:
+    """긴 문제를 여러 칸에 걸쳐 넣었으면 그 번호를, 그래도 넘쳤으면 그 사실을 찍는다."""
+    spread = result.get("spread") or {}
+    if spread:
+        print(lead + "길어서 칸 하나에 다 들어가지 않는 문제는 아래 칸과 합치거나 다음 칸에 이어 썼습니다: "
+              + ", ".join(f"{n}번(칸 {c}개)" for n, c in spread.items()) + ". 그만큼 쪽 수가 늘 수 있습니다.")
+    if result.get("overflow"):
+        tall = result.get("too_tall") or []
+        print(lead + f"주의: 내용이 칸을 넘쳐 쪽 수가 예상({result['expected_pages']}쪽)보다 많습니다"
+              + (f"(쪼갤 수 없는 큰 덩어리가 있는 문제: {', '.join(str(n) + '번' for n in tall)})" if tall else "")
+              + ". 사용자가 결과물에서 확인하도록 알리세요.")
+
+
 def cmd_build(args) -> int:
     from . import pipeline
     from .hwp.writer import HwpError
@@ -590,9 +602,7 @@ def cmd_build(args) -> int:
     if result.get("with_figures"):
         print(f"교재에서 그림을 잘라 붙인 문제: {result['with_figures']} — 그림이 맞게 잘렸는지는 확인하지 않았습니다. "
               "사용자에게 이 번호들의 그림을 결과물에서 직접 보고 고쳐 달라고 알리세요.")
-    if result["overflow"]:
-        print(f"주의: 내용이 칸을 넘쳐 쪽 수가 예상({result['expected_pages']}쪽)보다 많습니다. 어느 칸인지는 사용자가 결과물에서 "
-              "확인하도록 알리세요.")
+    _layout_notes(result)
     return 0
 
 
@@ -635,8 +645,7 @@ def cmd_make(args) -> int:
             for n, it in enumerate(tasks.load(args.workspace, args.id)["items"], 1) if it.get("by") == "agent"]
     if mine:
         print(f"  에이전트가 직접 잡은 영역: {', '.join(mine)} — 박스가 맞게 잡혔는지 결과물에서 확인해 달라고 알리세요.")
-    if r["overflow"]:
-        print(f"주의: 내용이 칸을 넘쳐 쪽 수가 예상({r['expected_pages']}쪽)보다 많습니다. 미리보기 그림에서 넘친 칸을 찾아 주세요:")
+    _layout_notes(r)
     if r["previews"]:
         print("미리보기 그림: " + ", ".join(r["previews"]))
     return 0

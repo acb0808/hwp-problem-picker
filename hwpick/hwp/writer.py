@@ -236,8 +236,10 @@ def write_document(template_hwp: Path, out_dir: Path, name: str, title: str, pro
     session을 주면 이미 띄워 둔 한글을 쓴다(닫는 것은 준 쪽의 일이다). preview가 거짓이면 미리보기용
     PDF는 내용이 칸을 넘쳤을 때만 만든다(PDF 저장에 2초가 든다).
 
-    돌려주는 값: {"hwp", "pdf", "pages", "expected_pages"}. 쪽 수가 예상보다 많으면 어느 칸의 내용이
-    넘친 것이다(호출한 쪽에서 사용자에게 알린다).
+    돌려주는 값: {"hwp", "pdf", "pages", "expected_pages", "spread", "too_tall"}.
+    내용이 칸을 넘치면(쪽 수가 예상보다 많아진다) 한글이 계산한 높이를 읽어, 넘친 문제를 아래 칸과 합치거나 다음 칸으로
+    이어 쓰게 다시 나눠 넣는다. spread는 그렇게 여러 칸을 쓴 문제({문제 번호: 칸 수})다. 그래도 쪽 수가 예상보다 많으면
+    쪼갤 수 없는 덩어리 하나가 두 칸보다 큰 것이다(too_tall에 그 문제 번호. 호출한 쪽에서 사용자에게 알린다).
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     work = out_dir / "work"
@@ -245,10 +247,34 @@ def write_document(template_hwp: Path, out_dir: Path, name: str, title: str, pro
     started = time.time()
     s = session or Session().__enter__()
     try:
-        plan = template.scaffold(_template_hwpx(template_hwp, work, s), work / "scaffold.hwpx", problems, title, first_page)
+        model = _template_hwpx(template_hwp, work, s)
+        plan = template.scaffold(model, work / "scaffold.hwpx", problems, title, first_page)
         s.open(work / "scaffold.hwpx", "HWPX")
         s.fill(plan.operations, pictures, progress)
         pages = s.pages
+        too_tall: list[int] = []
+        if pages > plan.pages:
+            # 어느 칸이 넘쳤다. 문제마다 실제 높이를 읽어 칸을 다시 나눈다(여유를 늘려 한 번 더 해 본다)
+            s.save(work / "measure.hwpx", "HWPX")
+            sizes = template.measure(work / "measure.hwpx", plan)
+            for slack in (150, 1500) if sizes else ():
+                layout = template.arrange(sizes, len(problems), plan.room, slack)
+                if layout == plan.columns:
+                    break
+                plan = template.scaffold(model, work / "scaffold.hwpx", problems, title, first_page, layout)
+                s.open(work / "scaffold.hwpx", "HWPX")
+                s.fill(plan.operations, pictures, progress)
+                pages = s.pages
+                if pages <= plan.pages:
+                    break
+            if sizes and pages > plan.pages:
+                limit = sum(plan.room[1][:2]) - plan.room[1][2]
+                too_tall = [i + 1 for i, (label, blocks) in sorted(sizes.items()) if any(label + h > limit for h, _ in blocks)]
+        used: dict[int, int] = {}
+        for column in plan.columns:
+            for cell in column:
+                if cell is not None:
+                    used[cell.problem + 1] = used.get(cell.problem + 1, 0) + (2 if len(column) == 1 else 1)
         hwp_path, pdf_path = out_dir / f"{name}.hwp", out_dir / f"{name}.pdf"
         pdf_path.unlink(missing_ok=True)
         s.save(hwp_path, "HWP")
@@ -262,4 +288,5 @@ def write_document(template_hwp: Path, out_dir: Path, name: str, title: str, pro
         if session is None:
             s.__exit__(None, None, None)
     return {"hwp": str(hwp_path), "pdf": str(pdf_path) if pdf_path.is_file() else "", "pages": pages,
-            "expected_pages": plan.pages, "seconds": round(time.time() - started, 1), "hwp_pid": pid}
+            "expected_pages": plan.pages, "seconds": round(time.time() - started, 1), "hwp_pid": pid,
+            "spread": {str(n): c for n, c in sorted(used.items()) if c > 1}, "too_tall": too_tall}
