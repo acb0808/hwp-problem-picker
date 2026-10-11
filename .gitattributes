@@ -3,3 +3,4 @@
 *.md text eol=lf
 *.hwpx binary
 *.whl binary
+*.svg text eol=lf
