@@ -91,8 +91,42 @@ def _spawn_apart(cmd: list[str], env: dict, cwd: str) -> bool:
         return False
 
 
+def _running(ws: Path) -> tuple[int, dict] | None:
+    """이 작업 폴더의 선택 화면 서버가 떠 있으면 (포트, 서버가 알려 준 상태). 없으면 None(새로 띄우지 않는다)."""
+    try:
+        port = json.loads((tasks.data_dir(ws) / "server.json").read_text(encoding="utf-8"))["port"]
+    except (OSError, ValueError, KeyError):
+        return None
+    alive = _ping(port)
+    return (port, alive) if alive is not None and Path(alive["workspace"]) == ws else None
+
+
+def _screen_note(workspace) -> None:
+    """사용자가 선택 화면을 열어 둔 채로 한글 파일을 다 만들었으면, 닫을지 물어보라고 알린다."""
+    ws = Path(workspace).resolve()
+    up = _running(ws)
+    if up is None or not up[1].get("screen"):
+        return
+    print("선택 화면이 아직 열려 있습니다. 결과를 알린 뒤 맨 끝에 사용자에게 「선택 화면을 닫을까요?」라고 한 줄로 묻고 턴을 끝내세요. "
+          "닫겠다고 하면 아래 명령을 실행하고, 더 고를 것이 있다고 하면 그대로 둡니다:")
+    print(f'  "{sys.executable}" -m hwpick --workspace "{ws}" close')
+
+
+def cmd_close(args) -> int:
+    ws = Path(args.workspace).resolve()
+    up = _running(ws)
+    if up is None:
+        print("떠 있는 선택 화면이 없습니다(이미 닫혀 있습니다).")
+        return 0
+    if not _retire(ws, up[0]):
+        print(f"선택 화면을 닫지 못했습니다(http://127.0.0.1:{up[0]}/). 그대로 두어도 8시간 쓰지 않으면 저절로 꺼집니다.")
+        return 1
+    print("선택 화면을 닫았습니다. 브라우저에 남아 있는 탭은 사용자가 닫으면 됩니다(다시 열려면 open).")
+    return 0
+
+
 def _retire(ws: Path, port: int) -> bool:
-    """이 작업 폴더에 옛 코드로 떠 있는 서버를 끈다. 껐으면 참(우리 서버가 맞는지 확인되지 않으면 건드리지 않는다)."""
+    """이 작업 폴더에 떠 있는 서버를 끈다. 껐으면 참(우리 서버가 맞는지 확인되지 않으면 건드리지 않는다)."""
     try:
         import psutil
         pid = json.loads((tasks.data_dir(ws) / "server.json").read_text(encoding="utf-8"))["pid"]
@@ -591,6 +625,7 @@ def cmd_finish(args) -> int:
         print(f"교재에서 그림을 잘라 붙인 문제: {result['with_figures']} — 그림이 맞게 잘렸는지는 확인하지 않았습니다.")
     _layout_notes(result)
     print("미리보기 그림을 열어 확인하지 말고, 위에 적힌 번호들을 사용자가 결과물에서 직접 보고 고치도록 그대로 알리세요.")
+    _screen_note(ws)
     return 0
 
 
@@ -709,6 +744,7 @@ def cmd_make(args) -> int:
     _layout_notes(r)
     if r["previews"]:
         print("미리보기 그림: " + ", ".join(r["previews"]))
+    _screen_note(args.workspace)
     return 0
 
 
@@ -746,6 +782,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
     p.add_argument("--no-browser", action="store_true")
     p.set_defaults(fn=cmd_open)
+
+    p = sub.add_parser("close", help="선택 화면을 닫는다(뒤에서 떠 있는 서버를 끈다)")
+    p.set_defaults(fn=cmd_close)
 
     p = sub.add_parser("books", help="교재 목록(선택 화면에 열려 있는 교재를 표시한다)")
     p.set_defaults(fn=cmd_books)

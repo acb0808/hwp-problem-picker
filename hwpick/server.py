@@ -55,6 +55,7 @@ class App:
         self.waiting: list[tuple[str, int]] = []    # 화면이 기다리는 쪽(뒤가 최신)
         self.warm: list[tuple[str, int]] = []       # 미리 읽어 둘 쪽
         self.focus: str | None = None           # 지금 보고 있는 교재
+        self.screen = False                     # 선택 화면을 브라우저가 연 적이 있는가(다 만든 뒤 닫을지 물을 때 본다)
         self.last_request = time.time()
         self.read_lock = threading.Lock()       # 아래 두 가지를 지킨다
         self.reading: set[str] = set()          # 지금 꺼내고 있는 문제(store의 열쇠)
@@ -722,12 +723,14 @@ class Handler(BaseHTTPRequestHandler):
         q = dict(urllib.parse.parse_qsl(url.query))
         try:
             if method == "GET" and url.path in ("/", "/index.html"):
+                app.screen = True
                 return self._send((WEB_DIR / "index.html").read_bytes(), "text/html; charset=utf-8")
             if parts[0] != "api":
                 return self._json({"error": "not found"}, 404)
             route = parts[1:]
             if route == ["ping"]:
-                return self._json({"ok": True, "app": "hwpick", "workspace": str(app.workspace), "stamp": STAMP})
+                return self._json({"ok": True, "app": "hwpick", "workspace": str(app.workspace), "stamp": STAMP,
+                                   "screen": app.screen})
             if route == ["state"]:
                 return self._json({"focus": app.focus})
             if route == ["pick"] and method == "POST":
