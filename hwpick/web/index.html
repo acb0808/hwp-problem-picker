@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HWPick 문제 고르기</title>
+<title>hwp-problem-picker 문제 고르기</title>
 <style>
 :root {
   --bg: #f4f5f7; --panel: #ffffff; --line: #e2e5ea; --text: #1d2330; --muted: #6b7385;
@@ -530,7 +530,7 @@ async function copy(text, done) {
 }
 $('copytask').onclick = () => {
   if (!S.task || !S.task.items.length) return toast('먼저 문제를 담으세요');
-  copy(`HWPick 태스크 ${S.task.id} (문제 ${S.task.items.length}개)`, '복사했습니다. 에이전트 채팅에 붙여 넣으세요.');
+  copy(`hwp-problem-picker 태스크 ${S.task.id} (문제 ${S.task.items.length}개)`, '복사했습니다. 에이전트 채팅에 붙여 넣으세요.');
 };
 $('copyids').onclick = () => {
   if (!S.task || !S.task.items.length) return toast('먼저 문제를 담으세요');

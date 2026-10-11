@@ -58,7 +58,7 @@ $env:HWPICK_NO_PAUSE="1"; & "$env:USERPROFILE\hwp-problem-picker\install_skill.b
 
 이 명령은 두 가지를 한다.
 
-- `%USERPROFILE%\.gemini\config\skills\hwpick` 에 설치 폴더로 가는 연결(바로가기 폴더)을 만든다. 파일을 복사하지 않는다.
+- `%USERPROFILE%\.gemini\config\skills\hwp-problem-picker` 에 설치 폴더로 가는 연결(바로가기 폴더)을 만든다. 파일을 복사하지 않는다. 예전 이름(`hwpick`)으로 만든 연결이 같은 설치 폴더를 가리키고 있으면 그 연결만 지운다.
 - `%USERPROFILE%\.gemini\config\agents\` 에 `hwpick-reader.md`, `hwpick-dispatch.md` 두 파일을 넣는다. 문제를 읽는 가벼운 서브에이전트의 정의다(명령을 실행하지 못하고 Flash Lite 모델로 돈다).
 
 안티그래비티가 다른 스킬 폴더를 쓰는 것이 확인되면, `HWPICK_SKILLS_DIR` 환경 변수에 그 폴더를 주고 같은 명령을 실행한다. 확인되지 않으면 위의 기본 위치를 그대로 쓴다.
@@ -77,7 +77,7 @@ $env:HWPICK_NO_PAUSE="1"; & "$env:USERPROFILE\hwp-problem-picker\install_skill.b
 
 - 설치 위치(`%USERPROFILE%\hwp-problem-picker`)와 점검 결과
 - **안티그래비티를 껐다 다시 켜야** 스킬이 보인다는 것
-- 쓰는 법: 교재 PDF가 든 폴더를 안티그래비티에서 열고, 요청에 "HWPick"이라는 말을 넣는다. 예: `HWPick 스킬로 (교재 이름)에서 2단원 문제만 모아서 한글 파일로 정리해 줘`
+- 쓰는 법: 교재 PDF가 든 폴더를 안티그래비티에서 열고, 요청에 스킬 이름 "hwp-problem-picker"를 넣는다. 예: `hwp-problem-picker 스킬로 (교재 이름)에서 2단원 문제만 모아서 한글 파일로 정리해 줘`
 - 실제로 한글 파일을 만들어 보지 않았다면 "만드는 것까지 확인했다"고 말하지 않는다.
 
 ## 업데이트
@@ -96,7 +96,7 @@ git -C "$env:USERPROFILE\hwp-problem-picker" pull
 
 사용자가 지워 달라고 할 때만 한다. 지우기 전에 무엇을 지우는지 알리고 확인을 받는다.
 
-- `%USERPROFILE%\.gemini\config\skills\hwpick` (연결만 지운다. 연결이 가리키는 폴더의 내용을 지우지 않게 주의한다)
+- `%USERPROFILE%\.gemini\config\skills\hwp-problem-picker` 와, 남아 있다면 예전 이름의 `skills\hwpick` (연결만 지운다. 연결이 가리키는 폴더의 내용을 지우지 않게 주의한다)
 - `%USERPROFILE%\.gemini\config\agents\hwpick-reader.md`, `hwpick-dispatch.md`
 - `%USERPROFILE%\hwp-problem-picker` 폴더
 - 교재를 읽어 둔 캐시 `%LOCALAPPDATA%\HWPick`

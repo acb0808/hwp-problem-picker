@@ -846,7 +846,7 @@ def serve(workspace: str | Path, libraries: list[str] | None = None, port: int =
 
     threading.Thread(target=idle_watch, daemon=True).start()
     threading.Thread(target=app.warm_reader, daemon=True).start()
-    print(f"HWPick 선택 화면: http://127.0.0.1:{port}/  (작업 폴더: {app.workspace})", flush=True)
+    print(f"hwp-problem-picker 선택 화면: http://127.0.0.1:{port}/  (작업 폴더: {app.workspace})", flush=True)
     try:
         httpd.serve_forever()
     finally:

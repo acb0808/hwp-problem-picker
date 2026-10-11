@@ -67,7 +67,7 @@ def run(fix: bool = False) -> int:
         if not good and hint:
             print("           → " + hint)
 
-    print("HWPick 설치 점검")
+    print("hwp-problem-picker 설치 점검")
     try:
         import cv2  # noqa: F401
         import pymupdf  # noqa: F401

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 480" width="760" role="img" aria-label="hwp-exam-restoration과 견준 결과. 한도는 문제 하나당 17배 적게, 시간은 문제 하나당 2배 빠르게, 정확도는 57문제 중 56~57문제 일치. 5시간 한도 10.6% 대 0.7%, 걸린 시간 12.7분 대 6.6분.">
+  <rect x="0.5" y="0.5" width="759" height="479" rx="12" fill="#ffffff" stroke="#d9dee7"/>
+  <g font-family="'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR','Noto Sans CJK KR',sans-serif" fill="#1c2230">
+    <text x="32" y="46" font-size="19" font-weight="700">hwp-exam-restoration과 견준 결과</text>
+
+    <rect x="32" y="68" width="224" height="100" rx="10" fill="#eef3fe"/>
+    <text x="48" y="94" font-size="14" font-weight="700">한도</text>
+    <text x="48" y="132" font-size="28" font-weight="700" fill="#2457d6">17배 적게</text>
+    <text x="48" y="154" font-size="13">문제 하나당 쓰는 한도</text>
+
+    <rect x="268" y="68" width="224" height="100" rx="10" fill="#eef3fe"/>
+    <text x="284" y="94" font-size="14" font-weight="700">시간</text>
+    <text x="284" y="132" font-size="28" font-weight="700" fill="#2457d6">2배 빠르게</text>
+    <text x="284" y="154" font-size="13">문제 하나당 걸리는 시간</text>
+
+    <rect x="504" y="68" width="224" height="100" rx="10" fill="#eef3fe"/>
+    <text x="520" y="94" font-size="14" font-weight="700">정확도</text>
+    <text x="520" y="132" font-size="28" font-weight="700" fill="#2457d6">98~100%</text>
+    <text x="520" y="154" font-size="13">57문제 중 56~57문제 일치</text>
+
+    <text x="32" y="210" font-size="15" font-weight="700">5시간 한도</text>
+    <text x="32" y="236" font-size="14">hwp-exam-restoration · 교재 10쪽, 51문제</text>
+    <rect x="32" y="244" width="500" height="18" rx="4" fill="#b8bec9"/>
+    <text x="544" y="259" font-size="16" font-weight="700">10.6%</text>
+    <text x="32" y="288" font-size="14">hwp-problem-picker · 교재 8쪽, 57문제</text>
+    <rect x="32" y="296" width="33" height="18" rx="4" fill="#2457d6"/>
+    <text x="77" y="311" font-size="16" font-weight="700" fill="#2457d6">0.7%</text>
+
+    <text x="32" y="352" font-size="15" font-weight="700">걸린 시간</text>
+    <text x="32" y="378" font-size="14">hwp-exam-restoration · 교재 10쪽, 51문제</text>
+    <rect x="32" y="386" width="500" height="18" rx="4" fill="#b8bec9"/>
+    <text x="544" y="401" font-size="16" font-weight="700">12.7분</text>
+    <text x="32" y="430" font-size="14">hwp-problem-picker · 교재 8쪽, 57문제</text>
+    <rect x="32" y="438" width="260" height="18" rx="4" fill="#2457d6"/>
+    <text x="304" y="453" font-size="16" font-weight="700" fill="#2457d6">6.6분</text>
+  </g>
+</svg>

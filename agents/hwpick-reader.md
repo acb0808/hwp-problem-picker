@@ -1,6 +1,6 @@
 ---
 name: hwpick-reader
-description: HWPick 스킬의 옮겨 적기 담당. 지시문 파일 하나를 읽고, 거기 적힌 그림을 보고 문제를 글로 옮겨 파일로 저장한다. 명령은 실행하지 못한다.
+description: hwp-problem-picker 스킬의 옮겨 적기 담당. 지시문 파일 하나를 읽고, 거기 적힌 그림을 보고 문제를 글로 옮겨 파일로 저장한다. 명령은 실행하지 못한다.
 tools:
   - view_file
   - write_to_file

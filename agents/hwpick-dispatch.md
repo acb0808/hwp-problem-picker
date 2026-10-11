@@ -1,6 +1,6 @@
 ---
 name: hwpick-dispatch
-description: HWPick 스킬의 일 나눠 주기 담당. 지시 파일에 적힌 옮겨 적기 서브에이전트들을 그대로 불러 주고, 모두 끝나면 알린다. 명령은 실행하지 못한다.
+description: hwp-problem-picker 스킬의 일 나눠 주기 담당. 지시 파일에 적힌 옮겨 적기 서브에이전트들을 그대로 불러 주고, 모두 끝나면 알린다. 명령은 실행하지 못한다.
 tools:
   - view_file
   - invoke_subagent

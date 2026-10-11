@@ -47,7 +47,7 @@ goto :summary
 echo.
 if "%DONE%"=="0" if "%BAD%"=="0" goto :none
 if not "%BAD%"=="0" goto :fail
-echo  에이전트를 다시 시작한 뒤 "HWPick" 이라고 말하면 문제 선택 화면이 열립니다.
+echo  에이전트를 다시 시작한 뒤 "hwp-problem-picker 스킬로 문제 선택 화면을 열어 줘" 라고 말해 보세요.
 echo.
 if not defined HWPICK_NO_PAUSE pause
 exit /b 0
@@ -68,7 +68,8 @@ exit /b 0
 
 rem ---- 스킬 폴더 하나에 연결한다: call :link "이름" "스킬 폴더"
 :link
-set "TARGET=%~2\hwpick"
+call :old_link "%~1" "%~2"
+set "TARGET=%~2\hwp-problem-picker"
 if exist "%TARGET%\SKILL.md" goto :link_already
 if exist "%TARGET%" goto :link_occupied
 if not exist "%~2" mkdir "%~2"
@@ -88,6 +89,16 @@ exit /b 0
 :link_fail
 echo  %~1: 연결하지 못했습니다. 위의 오류 내용을 알려 주세요.
 set /a BAD+=1
+exit /b 0
+
+rem ---- 예전 이름(hwpick)으로 만든 연결이 이 폴더를 가리키면 지운다(연결만 지운다. 다른 곳을 가리키면 그대로 둔다)
+:old_link
+set "OLD=%~2\hwpick"
+if not exist "%OLD%\SKILL.md" exit /b 0
+".venv\Scripts\python.exe" -c "import os,sys; a,b=[os.path.normcase(os.path.realpath(p)) for p in sys.argv[1:3]]; sys.exit(0 if os.path.isjunction(sys.argv[1]) and a==b else 1)" "%OLD%" "%HERE%"
+if errorlevel 1 exit /b 0
+rmdir "%OLD%"
+echo  %~1: 예전 이름^(hwpick^)의 연결을 지웠습니다.
 exit /b 0
 
 :need_setup

@@ -4,7 +4,7 @@ setlocal
 cd /d "%~dp0"
 
 echo.
-echo  HWPick 설치를 시작합니다. 이 창을 닫지 말고 기다려 주세요.
+echo  hwp-problem-picker 설치를 시작합니다. 이 창을 닫지 말고 기다려 주세요.
 echo.
 
 rem 에이전트가 대신 실행할 때는 HWPICK_NO_PAUSE=1 을 주면 끝에서 멈추지 않는다

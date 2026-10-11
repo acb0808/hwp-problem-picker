@@ -223,7 +223,7 @@ def cmd_pick(args) -> int:
         print("모은 문제가 없어 목록을 만들지 않았습니다.")
         return 1
     if res["task"]:
-        print(f"HWPick 태스크 {res['task']} (문제 {n}개)")
+        print(f"hwp-problem-picker 태스크 {res['task']} (문제 {n}개)")
         if any("빠진 번호" in note or "빠졌습니다" in note for note in res["notes"]):
             print(f'빠진 문제는 그 쪽을 보고 직접 담습니다(한글 파일을 만들기 전에): look "{book["name"]}" --page <쪽> --task {res["task"]}')
         print("선택 화면에서 이 목록을 열면 문제를 빼거나 순서를 바꿀 수 있습니다. 한글 파일로 만들려면:")
@@ -312,7 +312,7 @@ def cmd_add(args) -> int:
         said = "+".join(r["said"]) if r["said"] and isinstance(r["said"][0], str) else _coords(r["said"])
         print(f"담지 않았습니다: {said}" + (f"({r['label']})" if r["label"] else "") + f" — {r['why']}")
     if res["task"]:
-        print(f"HWPick 태스크 {res['task']} (문제 {res['count']}개)")
+        print(f"hwp-problem-picker 태스크 {res['task']} (문제 {res['count']}개)")
     if res["added"]:
         print("잡힌 모습 그림을 열어 확인하세요: 빨간 테두리 안이 담긴 영역이고 둘레는 옅게 보입니다(눈금은 쪽 전체 기준의 좌표). "
               "문제 하나가 처음부터 끝까지(선택지·그림 포함) 테두리 안에 있고 다른 문제나 제목이 섞이지 않았어야 합니다. "
@@ -335,7 +335,7 @@ def cmd_open(args) -> int:
     if not args.no_browser:
         webbrowser.open(url)
     print(f"문제 선택 화면: {url}")
-    print("사용자가 'HWPick 태스크 T…' 문구를 붙여 넣고 한글 파일을 만들어 달라고 하면, 다른 것은 하지 말고 이 명령 하나만 실행하세요"
+    print("사용자가 'hwp-problem-picker 태스크 T…' 문구를 붙여 넣고 한글 파일을 만들어 달라고 하면, 다른 것은 하지 말고 이 명령 하나만 실행하세요"
           "(T…는 문구에 있는 ID로 바꿉니다):")
     print(f'  "{sys.executable}" -m hwpick --workspace "{ws}" make T…')
     return 0
