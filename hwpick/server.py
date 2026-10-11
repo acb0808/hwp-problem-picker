@@ -20,7 +20,7 @@ import cv2
 import numpy as np
 import pymupdf
 
-from . import aim
+from . import aim, asks
 from . import outline as outlines
 from . import reader as readers
 from . import render, store, tasks
@@ -314,7 +314,11 @@ class App:
 
     # ---- 말로 범위를 정해 문제 모으기: 교재의 뼈대(단원·구획의 쪽 범위)와, 그 범위의 박스로 목록 만들기
 
-    def outline(self, pid: str, refresh: bool = False) -> dict:
+    def _paper(self, pid: str, strict: bool = True) -> asks.PaperReader:
+        """모델을 직접 부르지 않을 때의 읽기 담당: 물음을 서브에이전트에게 맡기고 그 답을 쓴다."""
+        return asks.PaperReader(tasks.data_dir(self.workspace) / "outline" / pid, strict)
+
+    def outline(self, pid: str, refresh: bool = False, wait: float = 0.0) -> dict:
         idx = self.index(pid)
         if idx.document:
             # 한글 문서: 구획이 따로 없고 문제 번호가 곧 차례다. 문서에서 직접 읽으므로 모델을 부를 일이 없다
@@ -343,12 +347,28 @@ class App:
         with lock:                                   # 같은 교재를 두 번 만들지 않는다
             if refresh:
                 outlines._file(idx).unlink(missing_ok=True)
+                self._paper(pid).forget()
             data = outlines.load(idx)
-            if data is None:
-                if not readers.available(self.workspace):
-                    raise ValueError("교재의 뼈대를 만들 수 없습니다: 모델을 직접 부를 수단(opencode)이 없습니다. "
-                                     "쪽 범위를 직접 알려 주면 pick --pages 로 모을 수 있습니다")
+            if data is None and readers.available(self.workspace):
                 data = outlines.build(idx, self._the_reader(), time.time() + 400)
+            elif data is None and not asks.enabled(self.workspace):
+                raise ValueError("이 교재의 뼈대(단원과 구획이 몇 쪽인지)가 아직 없어, 단원 이름으로는 범위를 정할 수 없습니다. "
+                                 "쪽 범위나 문제 번호를 알면 pick --pages 12-19 (또는 --first 0040 --last 0096)로 바로 모을 수 있고, "
+                                 "선택 화면(open)에서 직접 고를 수도 있습니다")
+            elif data is None:
+                # 시험 중인 길(설정 "outline": "subagent"): 쪽 그림을 읽는 물음을 서브에이전트에게 맡기고, 답이 오면 이어서 한다
+                paper = self._paper(pid)
+                left = paper.wait(wait)
+                if left and paper.waited() <= 2:
+                    return {"name": self.pdfs[pid]["name"], "pages": idx.page_count, "pending": "waiting",
+                            "jobs": [j["file"] for j in left], "round": paper.state["round"]}
+                try:
+                    asks.warm(idx, paper)
+                    data = outlines.build(idx, paper)
+                except asks.Pending:
+                    questions = len(paper.asked)
+                    return {"name": self.pdfs[pid]["name"], "pages": idx.page_count, "pending": "ask",
+                            "jobs": paper.jobs(), "questions": questions, "round": paper.state["round"]}
         return {"name": self.pdfs[pid]["name"], "pages": idx.page_count, "lines": outlines.describe(idx, data),
                 "units": bool(data.get("units")), "seconds": data["seconds"], "cost": data["cost"], "at": data["at"]}
 
@@ -385,7 +405,12 @@ class App:
                     time.sleep(0.2)
             return self.boxes(pid, page)["boxes"]
 
-        reader = self._the_reader() if sections and readers.available(self.workspace) else None
+        if not sections:
+            reader = None
+        elif readers.available(self.workspace):
+            reader = self._the_reader()
+        else:
+            reader = self._paper(pid, strict=False)      # 구획의 첫 문제 번호는 뼈대를 만들 때 받아 둔 답에서 꺼낸다
         pages = tuple(body["pages"]) if body.get("pages") else None
         got = outlines.collect(idx, data, reader, get_boxes, sections, pages, body.get("first"), body.get("last"))
         if numbers:
@@ -758,7 +783,7 @@ class Handler(BaseHTTPRequestHandler):
                 if route[2] == "info":
                     return self._json(app.info(pid))
                 if route[2] == "outline":
-                    return self._json(app.outline(pid, refresh=q.get("refresh") == "1"))
+                    return self._json(app.outline(pid, refresh=q.get("refresh") == "1", wait=float(q.get("wait") or 0)))
                 page = int(route[3]) - 1
                 if not 0 <= page < app.pdfs[pid]["pages"]:
                     return self._json({"error": "쪽 번호가 범위를 벗어났습니다"}, 404)

@@ -82,7 +82,7 @@ Test-Path "$env:USERPROFILE\.gemini\config\skills\hwp-problem-picker\SKILL.md"
 
 - 설치 위치(`%USERPROFILE%\hwp-problem-picker`)와 점검 결과
 - **안티그래비티를 껐다 다시 켜야** 스킬이 보인다는 것
-- 쓰는 법: 교재 PDF가 든 폴더를 안티그래비티에서 열고, 요청에 스킬 이름 "hwp-problem-picker"를 넣는다. 예: `hwp-problem-picker 스킬로 (교재 이름)에서 2단원 문제만 모아서 한글 파일로 정리해 줘`
+- 쓰는 법: 교재 PDF가 든 폴더를 안티그래비티에서 열고, 요청에 스킬 이름 "hwp-problem-picker"를 넣는다. 예: `hwp-problem-picker 스킬로 (교재 이름)의 60쪽부터 63쪽까지 문제를 전부 한글 파일로 만들어 줘`
 - 실제로 한글 파일을 만들어 보지 않았다면 "만드는 것까지 확인했다"고 말하지 않는다.
 
 ## 업데이트

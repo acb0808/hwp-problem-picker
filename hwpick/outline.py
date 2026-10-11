@@ -64,6 +64,24 @@ BOUNDARY_PROMPT = """첨부한 그림은 수학 교재의 한 쪽입니다. 이 
 """
 
 
+def _all(ex: ThreadPoolExecutor, fn, items) -> list:
+    """ex.map처럼 차례대로 결과를 주되, 하나가 실패해도 나머지를 끝까지 돌린 뒤에 그 실패를 올린다.
+
+    ex.map은 예외를 만나면 아직 시작하지 않은 일을 취소한다. 물음을 서브에이전트에게 맡기는 길(asks)에서는
+    "답이 아직 없다"가 예외로 오므로, 취소되면 답이 없는 물음을 한 번에 다 모으지 못한다.
+    """
+    futures = [ex.submit(fn, x) for x in items]
+    out, error = [], None
+    for future in futures:
+        try:
+            out.append(future.result())
+        except Exception as e:
+            error = error or e
+    if error is not None:
+        raise error
+    return out
+
+
 def _file(idx) -> Path:
     return idx.dir / f"outline{VERSION}.json"
 
@@ -217,7 +235,7 @@ def _read_toc(idx, reader, pages: list[list[str]], deadline: float | None) -> li
                           variant=CAREFUL)
 
     with ThreadPoolExecutor(max_workers=4) as ex:
-        texts = list(ex.map(read, candidates))
+        texts = _all(ex, read, candidates)
     for text in texts:
         for line in text.splitlines():
             parts = _cells(line)
@@ -273,7 +291,7 @@ def _offset(idx, reader, deadline: float | None) -> int | None:
         return (p + 1) - int(m.group(1)) if m else None
 
     with ThreadPoolExecutor(max_workers=len(probes)) as ex:
-        diffs = [d for d in ex.map(read, probes) if d is not None]
+        diffs = [d for d in _all(ex, read, probes) if d is not None]
     if not diffs:
         return None
     best = max(set(diffs), key=diffs.count)
@@ -309,7 +327,7 @@ def build(idx, reader, deadline: float | None = None) -> dict:
     pages: list[list[str]] = [["기타", "", ""] for _ in range(idx.page_count)]
     missing = 0
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        for group, got in zip(groups, ex.map(one, groups)):
+        for group, got in zip(groups, _all(ex, one, groups)):
             missing += len(group) - len(got)
             for p, info in got.items():
                 pages[p] = info
@@ -335,7 +353,7 @@ def build(idx, reader, deadline: float | None = None) -> dict:
         # 줄인 그림만 믿으면 STEP 1이 STEP 2로, 한 쪽의 둘째 제목이 첫째 제목 대신 읽힌 쪽이 하나만 끼어도 그 단원의
         # 구획이 통째로 틀린 이름을 단다. 큰 그림만 믿으면 구획 제목 대신 개념 소제목만 읽어 오는 쪽에서 구획을 잃는다.
         probes = sorted(p for g in stages for p in g)
-        checked = dict(zip(probes, ex.map(read_name, probes)))
+        checked = dict(zip(probes, _all(ex, read_name, probes)))
         titles = {(p, k): line for p in probes for k, line in enumerate(checked[p])}
         known: dict[str, str] = {}                      # 구획의 (견줄 이름 → 큰 그림에서 읽은 표기)
         canon: dict[tuple[int, int], str] = {}          # 큰 그림에서 읽힌 제목 가운데 여러 단원에 되풀이되는 것 → 표기
@@ -414,7 +432,7 @@ def build(idx, reader, deadline: float | None = None) -> dict:
                         hi = min([found[x] for x in order[i + 1:] if x in found], default=b)
                         suspects += [p for p in range(lo, hi) if not pages[p - 1][2]][:8]
             suspects = sorted(set(suspects))[:40]
-            for p, seen in zip(suspects, ex.map(read_name, suspects)):
+            for p, seen in zip(suspects, _all(ex, read_name, suspects)):
                 # 그 단원에 이미 있는 구획의 이름은 앞쪽에서 이어지는 머리글이다. 아직 없는 구획의 첫 제목을 쓴다
                 have = in_unit[unit_of(p) - 1] if unit_of(p) >= 1 else set()
                 match = next((v for line in seen for v in known.values()

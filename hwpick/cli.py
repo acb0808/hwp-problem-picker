@@ -91,7 +91,10 @@ def _server(ws: Path, port: int = DEFAULT_PORT, libraries: list[str] | None = No
         env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1]), PYTHONIOENCODING="utf-8")
         flags = 0
         if os.name == "nt":
-            flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            # DETACHED_PROCESS를 같이 주면 안 된다: 콘솔이 아예 없는 프로세스가 되어, 가상환경의 python.exe(진짜
+            # 파이썬을 다시 띄우는 실행 파일)가 띄운 파이썬에 윈도우가 새 콘솔 창(까만 빈 창)을 만들어 준다.
+            # CREATE_NO_WINDOW만 주면 보이지 않는 콘솔을 하나 갖고, 그 아래에서 뜨는 것들도 그것을 물려받는다
+            flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
         with open(log, "ab") as f:
             subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT,
                              env=env, creationflags=flags, close_fds=True)
@@ -164,7 +167,9 @@ def cmd_outline(args) -> int:
     ws = Path(args.workspace).resolve()
     port = _server(ws)
     book = _book(port, args.book)
-    res = _api(port, f"pdf/{book['id']}/outline" + ("?refresh=1" if args.refresh else ""), timeout=900)
+    res = _api(port, f"pdf/{book['id']}/outline?wait={args.wait:g}" + ("&refresh=1" if args.refresh else ""), timeout=900)
+    if res.get("pending"):
+        return _outline_hand_over(res, args)
     if res.get("document"):
         rest = res["problems"] - res.get("direct", res["problems"])
         print(f"{res['name']} ({res['pages']}쪽, 문제 {res['problems']}개). 한글 문서라 구획은 없고 문제 번호로 고릅니다."
@@ -184,6 +189,29 @@ def cmd_outline(args) -> int:
     for line in res["lines"]:
         print(line)
     print(f'모으려면: pick "{res["name"]}" --section <구획 ID> [--section …] --name "목록 이름"')
+    return 0
+
+
+def _outline_hand_over(res: dict, args) -> int:
+    """교재의 뼈대를 알아내려고 쪽 그림을 읽는 일을 서브에이전트에게 넘기는 방법을 찍는다."""
+    again = _again(args, f'outline "{res["name"]}"')
+    if res["pending"] == "waiting":
+        print(f"{res['name']}: 서브에이전트가 아직 끝나지 않았습니다(답이 덜 온 지시문 {len(res['jobs'])}개).")
+        print(f"같은 명령을 다시 실행하세요(다시 기다립니다): {again}")
+        return 2
+    print(f"{res['name']} ({res['pages']}쪽): 단원 구성을 알아내려면 쪽 그림을 읽어야 합니다(교재마다 처음 한 번, 이번이 {res['round']}번째 읽기).")
+    print(f"그림 {res['questions']}장을 가벼운 서브에이전트 {len(res['jobs'])}개가 나눠 읽습니다. 쪽을 직접 열어 보지 않습니다.")
+    print("1) 아래 한 줄을 인자로 invoke_subagent를 **한 번** 호출하세요(안티그래비티). 고치지 말고 그대로 넣습니다.")
+    short = _dispatch(res["jobs"], READ_PAGES)
+    if short:
+        print(short)
+        print("   (이 서브에이전트가 읽기 담당들을 대신 불러 줍니다. 그 파일을 열어 보거나 읽기 담당을 직접 부르지 않습니다.)")
+    else:
+        print(_invoke(res["jobs"], READ_PAGES))
+        print("   (안티그래비티가 아니면: 위 Prompt 하나마다 새 서브에이전트 하나에게 그 문장을 그대로 주고, 모두 동시에 돌립니다.)")
+    print("2) 호출한 뒤에는 서브에이전트를 기다리거나 상태를 살피지 말고 **곧바로** 같은 명령을 다시 실행하세요:")
+    print(f"   {again}")
+    print("   이 명령이 서브에이전트들이 끝날 때까지 기다렸다가 이어서 합니다. 앞의 답을 봐야 정해지는 쪽이 있어, 같은 안내가 한두 번 더 나올 수 있습니다.")
     return 0
 
 
@@ -369,16 +397,20 @@ def _installed(name: str) -> bool:
     return (Path.home() / ".gemini" / "config" / "agents" / f"{name}.md").is_file()
 
 
-def _invoke(files: list[str]) -> str:
+READ_PROBLEMS = ("수학 문제 옮겨 적기", "고른 문제를 글로 옮겨 적습니다", "문제 옮겨 적기")
+READ_PAGES = ("교재 쪽 읽기", "교재의 단원 구성을 읽습니다", "단원 구성 읽기")
+
+
+def _invoke(files: list[str], words: tuple[str, str, str] = READ_PROBLEMS) -> str:
     """안티그래비티의 invoke_subagent에 그대로 넣을 인자(한 줄 JSON). 지시문 파일마다 가벼운 서브에이전트 하나."""
     kind = READER_AGENT if _installed(READER_AGENT) else "self"
-    subs = [{"Model": "flash_lite", "Prompt": f"다음 파일을 읽고 그 안의 지시를 그대로 따르세요: {f}", "Role": "수학 문제 옮겨 적기",
+    subs = [{"Model": "flash_lite", "Prompt": f"다음 파일을 읽고 그 안의 지시를 그대로 따르세요: {f}", "Role": words[0],
              "TypeName": kind, "Workspace": "inherit"} for f in files]
-    return json.dumps({"Subagents": subs, "toolAction": "고른 문제를 글로 옮겨 적습니다", "toolSummary": "문제 옮겨 적기"},
+    return json.dumps({"Subagents": subs, "toolAction": words[1], "toolSummary": words[2]},
                       ensure_ascii=False, separators=(",", ":"))
 
 
-def _dispatch(files: list[str]) -> str | None:
+def _dispatch(files: list[str], words: tuple[str, str, str] = READ_PROBLEMS) -> str | None:
     """읽기 담당을 직접 부르지 않고 나눠 주기 담당에게 맡기는 인자. 전용 서브에이전트 둘이 깔려 있을 때만 쓴다(없으면 None).
 
     주 에이전트가 한도를 쓰는 것은 응답 횟수와 문맥 길이다. 읽기 담당 20개를 직접 부르면 인자 5천 자를 받아 적어야 하고
@@ -392,9 +424,9 @@ def _dispatch(files: list[str]) -> str | None:
     for k in range(0, len(files), DISPATCH_READERS):
         group = files[k:k + DISPATCH_READERS]
         path = folder / f"dispatch-{k // DISPATCH_READERS + 1:02d}.txt"
-        path.write_text("".join(_invoke(group[i:i + DISPATCH_LINE]) + "\n" for i in range(0, len(group), DISPATCH_LINE)), encoding="utf-8")
+        path.write_text("".join(_invoke(group[i:i + DISPATCH_LINE], words) + "\n" for i in range(0, len(group), DISPATCH_LINE)), encoding="utf-8")
         subs.append({"Model": "flash_lite", "Prompt": str(path), "Role": "일 나눠 주기", "TypeName": DISPATCH_AGENT, "Workspace": "inherit"})
-    return json.dumps({"Subagents": subs, "toolAction": "옮겨 적기 일을 나눠 줍니다", "toolSummary": "일 나눠 주기"},
+    return json.dumps({"Subagents": subs, "toolAction": "읽는 일을 나눠 줍니다", "toolSummary": "일 나눠 주기"},
                       ensure_ascii=False, separators=(",", ":"))
 
 
@@ -645,6 +677,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("outline", help="교재의 뼈대: 단원과 구획이 몇 쪽부터 몇 쪽인지(처음 한 번은 1~2분 걸린다)")
     p.add_argument("book", nargs="?", help="교재 이름의 일부나 ID(생략하면 선택 화면에 열려 있는 교재)")
     p.add_argument("--refresh", action="store_true", help="저장해 둔 뼈대를 버리고 다시 만든다")
+    p.add_argument("--wait", type=float, default=240.0, help="쪽 그림을 읽는 서브에이전트를 기다려 줄 최대 시간(초)")
     p.set_defaults(fn=cmd_outline)
 
     p = sub.add_parser("pick", help="구획이나 쪽 범위의 문제를 박스에서 모아 목록을 만든다")
