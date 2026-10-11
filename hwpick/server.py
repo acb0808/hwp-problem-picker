@@ -28,6 +28,7 @@ from .index import PDF_LOCK, PdfIndex, cache_root, cached_pages
 
 DEFAULT_PORT = tasks.DEFAULT_PORT
 IDLE_EXIT_HOURS = 8
+STAMP = tasks.code_stamp()   # 이 서버가 뜰 때의 코드. 스킬을 업데이트한 뒤에도 옛 서버가 남아 있으면 명령이 이것을 보고 새로 띄운다
 READ_WORKERS = 4         # 한꺼번에 꺼내는 한글 문서의 문제 수
 WEB_DIR = Path(__file__).parent / "web"
 MAX_WAITING = 6          # 화면이 기다리는 쪽은 이만큼만 기억한다(빨리 넘기며 지나친 쪽은 버린다)
@@ -726,7 +727,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "not found"}, 404)
             route = parts[1:]
             if route == ["ping"]:
-                return self._json({"ok": True, "app": "hwpick", "workspace": str(app.workspace)})
+                return self._json({"ok": True, "app": "hwpick", "workspace": str(app.workspace), "stamp": STAMP})
             if route == ["state"]:
                 return self._json({"focus": app.focus})
             if route == ["pick"] and method == "POST":
@@ -822,7 +823,19 @@ class Server(ThreadingHTTPServer):
             super().handle_error(request, client_address)
 
 
-def serve(workspace: str | Path, libraries: list[str] | None = None, port: int = DEFAULT_PORT) -> None:
+def serve(workspace: str | Path, libraries: list[str] | None = None, port: int = DEFAULT_PORT,
+          log: str | Path | None = None) -> None:
+    if log:
+        # 따로 띄운 서버는 출력을 받아 줄 곳이 없다. 스스로 로그 파일에 적는다(파이썬 밖에서 찍는 글까지)
+        out = open(log, "a", encoding="utf-8", buffering=1)
+        for stream, fd in ((sys.stdout, 1), (sys.stderr, 2)):
+            try:
+                if stream is not None:
+                    stream.flush()
+                os.dup2(out.fileno(), fd)
+            except (OSError, ValueError):
+                pass
+        sys.stdout = sys.stderr = out
     app = App(workspace, libraries)
     Handler.app = app
     httpd = Server(("127.0.0.1", port), Handler)

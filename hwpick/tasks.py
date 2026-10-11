@@ -12,6 +12,12 @@ import threading
 import time
 from pathlib import Path
 
+
+def code_stamp() -> str:
+    """지금 이 코드가 어느 것인지(폴더와 가장 최근에 고친 시각). 떠 있는 선택 화면 서버가 옛 코드인지 가릴 때 쓴다."""
+    root = Path(__file__).resolve().parent
+    return f"{root}|{max((f.stat().st_mtime_ns for f in root.rglob('*.py')), default=0)}"
+
 DATA_DIR = "hwpick_data"
 DEFAULT_PORT = 8765        # 선택 화면 서버의 기본 포트
 

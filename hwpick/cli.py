@@ -64,8 +64,52 @@ def _busy(port: int) -> bool:
 
 def cmd_serve(args) -> int:
     from .server import serve
-    serve(args.workspace, args.library, args.port)
+    serve(args.workspace, args.library, args.port, args.log)
     return 0
+
+
+def _spawn_apart(cmd: list[str], env: dict, cwd: str) -> bool:
+    """윈도우의 관리 서비스(WMI)에게 프로세스를 대신 띄워 달라고 한다. 띄웠으면 참.
+
+    에이전트 프로그램(안티그래비티)은 명령이 끝나면 그 명령이 띄운 프로세스들을 한꺼번에 정리한다(작업 개체). 여느 방법으로
+    띄운 서버는 `open`이 끝나자마자 같이 꺼져서 선택 화면이 열리지 않는다. 이렇게 띄운 프로세스는 이 명령의 자식이 아니고
+    그 묶음에도 들지 않아서 살아남는다. 창은 숨긴다(보이지 않는 콘솔을 하나 갖고, 그 아래에서 뜨는 것들도 물려받는다).
+    """
+    try:
+        import win32com.client
+        wmi = win32com.client.GetObject("winmgmts:root\\cimv2")
+        startup = wmi.Get("Win32_ProcessStartup").SpawnInstance_()
+        startup.ShowWindow = 0
+        startup.EnvironmentVariables = [f"{k}={v}" for k, v in env.items() if k and not k.startswith("=")]
+        process = wmi.Get("Win32_Process")
+        params = process.Methods_("Create").InParameters.SpawnInstance_()
+        params.CommandLine = subprocess.list2cmdline(cmd)
+        params.CurrentDirectory = cwd
+        params.ProcessStartupInformation = startup
+        return process.ExecMethod_("Create", params).ReturnValue == 0
+    except Exception:
+        return False
+
+
+def _retire(ws: Path, port: int) -> bool:
+    """이 작업 폴더에 옛 코드로 떠 있는 서버를 끈다. 껐으면 참(우리 서버가 맞는지 확인되지 않으면 건드리지 않는다)."""
+    try:
+        import psutil
+        pid = json.loads((tasks.data_dir(ws) / "server.json").read_text(encoding="utf-8"))["pid"]
+        proc = psutil.Process(pid)
+        line = proc.cmdline()
+        where = line[line.index("--workspace") + 1]
+        if not ("hwpick" in line and "serve" in line and Path(where).resolve() == ws):
+            return False
+        proc.terminate()
+        proc.wait(5)
+    except Exception:
+        return False
+    for _ in range(20):
+        if _ping(port) is None and not _busy(port):
+            return True
+        time.sleep(0.25)
+    return False
 
 
 def _server(ws: Path, port: int = DEFAULT_PORT, libraries: list[str] | None = None) -> int:
@@ -84,27 +128,42 @@ def _server(ws: Path, port: int = DEFAULT_PORT, libraries: list[str] | None = No
         if (alive is not None and Path(alive["workspace"]) == ws) or (alive is None and not _busy(port)):
             break
         port += 1
+    alive = _ping(port)
+    if alive is not None and Path(alive["workspace"]) == ws and alive.get("stamp") != tasks.code_stamp() and not _retire(ws, port):
+        # 스킬을 업데이트하기 전의 코드로 떠 있는 서버인데 끄지 못했다: 그것은 두고 다른 포트에 새로 띄운다
+        port += 1
+        while _ping(port) is not None or _busy(port):
+            port += 1
     if _ping(port) is None:
         log = tasks.data_dir(ws) / "server.log"
+        home = str(Path(__file__).resolve().parents[1])      # 이 코드가 있는 곳에서 띄워야 같은 코드의 서버가 뜬다
         cmd = [sys.executable, "-m", "hwpick", "serve", "--workspace", str(ws), "--port", str(port)]
         for lib in libraries or []:
             cmd += ["--library", lib]
-        env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1]), PYTHONIOENCODING="utf-8")
-        flags = 0
-        if os.name == "nt":
-            # DETACHED_PROCESS를 같이 주면 안 된다: 콘솔이 아예 없는 프로세스가 되어, 가상환경의 python.exe(진짜
-            # 파이썬을 다시 띄우는 실행 파일)가 띄운 파이썬에 윈도우가 새 콘솔 창(까만 빈 창)을 만들어 준다.
-            # CREATE_NO_WINDOW만 주면 보이지 않는 콘솔을 하나 갖고, 그 아래에서 뜨는 것들도 그것을 물려받는다
-            flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
-        with open(log, "ab") as f:
-            subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT,
-                             env=env, creationflags=flags, close_fds=True)
-        for _ in range(60):
-            if _ping(port):
-                break
-            time.sleep(0.5)
-        else:
-            raise ValueError(f"선택 화면 서버를 켜지 못했습니다. 로그: {log}")
+        env = dict(os.environ, PYTHONPATH=home, PYTHONIOENCODING="utf-8")
+
+        def up(seconds: float) -> bool:
+            end = time.time() + seconds
+            while time.time() < end:
+                if _ping(port):
+                    return True
+                time.sleep(0.5)
+            return False
+
+        apart = os.name == "nt" and os.environ.get("HWPICK_SPAWN", "").strip().lower() != "child"
+        if not (apart and _spawn_apart(cmd + ["--log", str(log)], env, home) and up(20)):
+            flags = 0
+            if os.name == "nt":
+                # DETACHED_PROCESS를 같이 주면 안 된다: 콘솔이 아예 없는 프로세스가 되어, 가상환경의 python.exe(진짜
+                # 파이썬을 다시 띄우는 실행 파일)가 띄운 파이썬에 윈도우가 새 콘솔 창(까만 빈 창)을 만들어 준다.
+                # CREATE_NO_WINDOW만 주면 보이지 않는 콘솔을 하나 갖고, 그 아래에서 뜨는 것들도 그것을 물려받는다
+                flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+            if _ping(port) is None:
+                with open(log, "ab") as out:
+                    subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
+                                     env=env, cwd=home, creationflags=flags, close_fds=True)
+            if not up(30):
+                raise ValueError(f"선택 화면 서버를 켜지 못했습니다. 로그: {log}")
     else:
         for lib in libraries or []:              # 이미 떠 있는 서버에는 폴더를 따로 알려 준다
             _api(port, "library", {"path": lib})
@@ -679,6 +738,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--workspace", default=argparse.SUPPRESS)
     p.add_argument("--library", action="append", help="PDF나 한글 문서가 있는 폴더(여러 번 지정 가능)")
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
+    p.add_argument("--log", help="출력을 이 파일에 적는다(뒤에서 따로 띄울 때 쓴다)")
     p.set_defaults(fn=cmd_serve)
 
     p = sub.add_parser("open", help="선택 화면을 브라우저로 연다")
