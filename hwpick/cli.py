@@ -574,6 +574,8 @@ def cmd_check(args) -> int:
 
 def _layout_notes(result: dict, lead: str = "") -> None:
     """긴 문제를 여러 칸에 걸쳐 넣었으면 그 번호를, 그래도 넘쳤으면 그 사실을 찍는다."""
+    if result.get("joined"):
+        print(lead + "교재에서 나란히 놓여 있던 그림들은 한 장으로 묶어 넣었습니다(놓인 모습 그대로): " + ", ".join(f"{n}번" for n in result["joined"]))
     spread = result.get("spread") or {}
     if spread:
         print(lead + "길어서 칸 하나에 다 들어가지 않는 문제는 아래 칸과 합치거나 다음 칸에 이어 썼습니다: "

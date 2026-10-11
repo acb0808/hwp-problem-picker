@@ -815,6 +815,7 @@ def build(workspace: str | Path, task_id: str, template: str | Path | None = Non
     tpl = find_template(ws, template)
     problems, pictures, as_image, with_figures = [], {}, [], []
     books: dict = {}
+    joined: list[int] = []                       # 교재에서 나란히 놓인 그림들을 한 장으로 묶어 넣은 문제
     for i, p in enumerate(state["problems"]):
         folder = run / p["folder"]
         md = folder / "text.md"
@@ -832,7 +833,10 @@ def build(workspace: str | Path, task_id: str, template: str | Path | None = Non
             continue
         for f in p["figures"]:
             pictures[(i, f["name"])] = writer.Picture(folder / f["file"], f["width_mm"], f["height_mm"])
-        problems.append(_from_reading(folder, parsed.blocks))
+        blocks, together = _merge_figures(_from_reading(folder, parsed.blocks), p, i, folder, pictures, books)
+        if together:
+            joined.append(p["n"])
+        problems.append(blocks)
         if any(f["name"] in used for f in p["figures"] for used in [_figure_names(parsed.blocks)]):
             with_figures.append(p["n"])
     base = re.sub(r'[\\/:*?"<>|]', "_", name or state.get("name") or task_id).strip() or task_id
@@ -856,7 +860,7 @@ def build(workspace: str | Path, task_id: str, template: str | Path | None = Non
                 path = out / f"page-{n}.png"
                 page.get_pixmap(dpi=110).save(str(path))
                 previews.append(str(path))
-    result.update({"file": str(final), "previews": previews, "as_image": as_image, "with_figures": with_figures,
+    result.update({"file": str(final), "previews": previews, "as_image": as_image, "with_figures": with_figures, "joined": joined,
                    "overflow": result["pages"] > result["expected_pages"]})
     (run / "build.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
     return result
@@ -877,6 +881,123 @@ def _whole_scan(folder: Path, p: dict, books: dict) -> tuple[Path, float]:
     except (OSError, ValueError, KeyError, RuntimeError):
         return fallback
     return folder / "whole.png", min(MAX_FIGURE_MM[0], max(r[2] - r[0] for r in rects) * MM_PER_PT)
+
+
+def _figure_groups(names: list[str], rects: dict[str, list[float]]) -> list[list[list[str]]]:
+    """잇달아 적힌 그림들을 교재에 놓인 모습대로 묶는다: [묶음 → 줄 → 왼쪽부터의 그림 이름].
+
+    세로로 겹치는(같은 높이에 놓인) 그림들이 한 줄이다. 바로 아래 줄이 윗줄과 칸의 왼쪽 끝을 맞춰 놓여 있고 그림 크기가
+    비슷하면 같은 묶음의 다음 줄이다(그림으로 된 선택지 ①②③ / ④⑤). 혼자 놓인 그림은 그것만으로 한 묶음이다.
+    """
+    rows: list[list[str]] = []
+    for name in names:
+        x0, y0, x1, y1 = rects[name]
+        if rows:
+            top, bottom = min(rects[n][1] for n in rows[-1]), max(rects[n][3] for n in rows[-1])
+            shared = min(y1, bottom) - max(y0, top)
+            apart = all(x0 >= rects[n][2] - 2 or x1 <= rects[n][0] + 2 for n in rows[-1])
+            if apart and shared >= 0.6 * min(y1 - y0, bottom - top):
+                rows[-1].append(name)
+                continue
+        rows.append([name])
+    rows = [sorted(r, key=lambda n: rects[n][0]) for r in rows]
+
+    def width(n: str) -> float:
+        return rects[n][2] - rects[n][0]
+
+    def height(n: str) -> float:
+        return rects[n][3] - rects[n][1]
+
+    groups: list[list[list[str]]] = []
+    for row in rows:
+        if groups:
+            last = groups[-1][-1]
+            everyone = [n for r in groups[-1] for n in r] + row
+            ws, hs = sorted(width(n) for n in everyone), sorted(height(n) for n in everyone)
+            alike = ws[-1] <= 1.35 * ws[0] and hs[-1] <= 1.35 * hs[0]
+            gap = min(rects[n][1] for n in row) - max(rects[n][3] for n in last)
+            short, long = sorted((row, last), key=len)
+            lined = all(any(abs(rects[n][0] - rects[m][0]) <= 0.25 * ws[len(ws) // 2] for m in long) for n in short)
+            if max(len(row), len(last)) >= 2 and alike and lined and -2 <= gap <= hs[len(hs) // 2]:
+                groups[-1].append(row)
+                continue
+        groups.append([row])
+    return groups
+
+
+def _side_by_side(blocks: list, rects: dict[str, list[float]], make) -> list:
+    """잇달아 적힌 그림 가운데 교재에서 나란히 놓여 있던 것들을 make(줄들)이 돌려준 블록 하나로 바꾼다(None이면 그대로 둔다)."""
+    out: list = []
+    run: list[str] = []
+
+    def flush() -> None:
+        for group in _figure_groups(run, rects) if run else []:
+            made = make(group) if sum(len(r) for r in group) > 1 else None
+            out.extend([made] if made is not None else [transcript.Figure(n) for r in group for n in r])
+        run.clear()
+
+    for b in blocks:
+        if isinstance(b, transcript.Figure) and b.name in rects:
+            run.append(b.name)
+            continue
+        flush()
+        if isinstance(b, transcript.Boxed):
+            b = transcript.Boxed(b.label, _side_by_side(b.blocks, rects, make))
+        out.append(b)
+    flush()
+    return out
+
+
+def _between(idx, page: int, rects: list[list[float]]) -> int:
+    """그림들을 한꺼번에 감싸는 네모 안에서, 그림들 밖에 있는 글자 크기의 잉크 덩어리 수(그림 사이에 낀 글이 있는지 본다)."""
+    lay, s = idx.layout(page), idx.scale(page)
+    x0, y0 = min(r[0] for r in rects) * s, min(r[1] for r in rects) * s
+    x1, y1 = max(r[2] for r in rects) * s, max(r[3] for r in rects) * s
+    pad = 0.3 * lay.em
+    count = 0
+    for b in lay.blobs:
+        cx, cy = (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2
+        if not (x0 <= cx <= x1 and y0 <= cy <= y1) or not 0.4 * lay.em <= b.h <= 1.6 * lay.em:
+            continue
+        if not any(r[0] * s - pad <= cx <= r[2] * s + pad and r[1] * s - pad <= cy <= r[3] * s + pad for r in rects):
+            count += 1
+    return count
+
+
+def _merge_figures(blocks: list, p: dict, i: int, folder: Path, pictures: dict, books: dict) -> tuple[list, bool]:
+    """교재에서 나란히(또는 격자로) 놓여 있던 그림들을 한 장으로 다시 오려 넣는다. (바꾼 블록들, 묶은 것이 있는가)
+
+    그림은 문단 하나에 하나씩 들어가 세로로 쌓인다. 그래서 좌우로 나란한 그림이나 그림으로 된 선택지(①②③ / ④⑤)는
+    따로 넣으면 교재의 배치가 사라진다. 그런 그림들을 한꺼번에 감싸는 범위를 교재에서 한 장으로 오리면 놓인 모습과
+    그림에 붙은 번호가 그대로 남는다(낱개로 표에 나눠 넣는 방식도 해 봤다. 모양은 비슷하지만 그렇게 만든 문서에서 문제를
+    다시 고를 때 "표가 있는 문제"가 되어 그대로 꺼내지 못했다). 그림 사이에 글이 끼어 있으면 묶지 않는다.
+    """
+    from . import render
+    from .hwp import writer
+    rects = {f["name"]: f["rect"] for f in p["figures"] if f.get("rect")}
+    if len(rects) < 2 or not p.get("pdf_path") or not p.get("page"):
+        return blocks, False
+    done = []
+
+    def merged(group: list[list[str]]):
+        names = [n for row in group for n in row]
+        members = [rects[n] for n in names]
+        union = [min(r[0] for r in members), min(r[1] for r in members), max(r[2] for r in members), max(r[3] for r in members)]
+        try:
+            idx = _index(p, books)
+            if _between(idx, p["page"] - 1, members) > 6:
+                return None
+            path = folder / f"fig-{'+'.join(names)}.png"
+            render.imwrite(path, _scan_clip(idx, p["page"] - 1, union))
+        except (OSError, ValueError, KeyError, RuntimeError):
+            return None                               # 교재를 열 수 없으면 따로따로 넣는다
+        w_mm, h_mm = (union[2] - union[0]) * MM_PER_PT, (union[3] - union[1]) * MM_PER_PT
+        shrink = min(1.0, MAX_FIGURE_MM[0] / w_mm, MAX_FIGURE_MM[1] / h_mm)
+        pictures[(i, "+".join(names))] = writer.Picture(path, round(w_mm * shrink, 1), round(h_mm * shrink, 1))
+        done.append(names)
+        return transcript.Figure("+".join(names))
+
+    return _side_by_side(blocks, rects, merged), bool(done)
 
 
 def _figure_names(blocks: list) -> set[str]:
