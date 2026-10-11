@@ -24,7 +24,7 @@ from ..transcript import CIRCLED
 from ..transcript import RAW_EQUATION as RAW     # 전사 글에서 "이 수식은 이미 한글 수식 문법"이라는 표시
 
 SUFFIXES = (".hwp", ".hwpx")
-VERSION = 4                  # 꺼내는 방식을 바꾸면 올린다(변환해 둔 PDF·HWPX는 그대로 쓴다)
+VERSION = 5                  # 꺼내는 방식을 바꾸면 올린다(변환해 둔 PDF·HWPX는 그대로 쓴다)
 HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 HH = "http://www.hancom.co.kr/hwpml/2011/head"
 UNIT_PER_MM = 7200 / 25.4    # HWPUNIT
